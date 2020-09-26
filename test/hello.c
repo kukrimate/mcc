@@ -3,5 +3,5 @@
 int
 main(void)
 {
-	printf("Hello World!\n");
+	printf(L"Hello World! %c\n", L' ');
 }

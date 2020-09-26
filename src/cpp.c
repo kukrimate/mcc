@@ -142,6 +142,32 @@ escseq(struct chvec *v, int ch)
 
 static
 void
+character(struct chvec *v, int ch)
+{
+	chvec_add(v, ch);
+	for (;;) {
+		ch = mgetc();
+		switch (ch) {
+		/* Normal character */
+		default:
+			chvec_add(v, ch);
+			if (ch == '\'') /* End of character constant */
+				return;
+			break;
+		/* Escape sequence */
+		case '\\':
+			escseq(v, ch);
+			break;
+		/* Invalid character constant */
+		case EOF:
+		case '\n':
+			cpp_err();
+		}
+	}
+}
+
+static
+void
 string(struct chvec *v, int ch)
 {
 	chvec_add(v, ch);
@@ -274,6 +300,19 @@ cpp_tokenize(void)
 			}
 		}
 
+		/* Wide string and char literals */
+		if (ch == 'L')
+			switch (mpeek()) {
+			case '\'':
+				chvec_add(&v, 'L');
+				ch = mgetc();
+				goto charlit;
+			case '"':
+				chvec_add(&v, 'L');
+				ch = mgetc();
+				goto strlit;
+			}
+
 		switch (ch) {
 		/* Whitespace */
 		WHITESPACE
@@ -282,8 +321,14 @@ cpp_tokenize(void)
 		NONDIGIT
 			identifier(&v, ch);
 			break;
+		/* Character */
+		case '\'':
+		charlit:
+			character(&v, ch);
+			break;
 		/* String */
 		case '"':
+		strlit:
 			string(&v, ch);
 			break;
 		/* Punctuator */

@@ -21,7 +21,7 @@ void
 identifier(struct chvec *v, int ch)
 {
 	chvec_add(v, ch);
-	for (;;) {
+	for (;;)
 		switch (mpeek()) {
 		/* Identifier character */
 		NONDIGIT
@@ -30,6 +30,39 @@ identifier(struct chvec *v, int ch)
 			break;
 		/* End of identifier */
 		default:
+			return;
+		}
+}
+
+static
+void
+ppnum(struct chvec *v, int ch)
+{
+	chvec_add(v, ch);
+	for (;;) {
+		switch(mpeek()) {
+		/* Letters, numbers, _ and . */
+		NONDIGIT
+		DIGIT
+		case '.':
+			ch = mgetc();
+			chvec_add(v, ch);
+
+			/* Check for exponent */
+			switch (ch) {
+			case 'e':
+			case 'E':
+			case 'p':
+			case 'P':
+				switch (mpeek()) {
+				case '+':
+				case '-':
+					chvec_add(v, mgetc());
+					break;
+				}
+			}
+			break;
+		default: /* Not a valid ppnum character */
 			return;
 		}
 	}
@@ -313,6 +346,15 @@ cpp_tokenize(void)
 				goto strlit;
 			}
 
+		/* Optional . in front of ppnums */
+		if (ch == '.')
+			switch (mpeek()) {
+			DIGIT
+				chvec_add(&v, '.');
+				ch = mgetc();
+				goto ppnum;
+			}
+
 		switch (ch) {
 		/* Whitespace */
 		WHITESPACE
@@ -320,6 +362,11 @@ cpp_tokenize(void)
 		/* Identifier */
 		NONDIGIT
 			identifier(&v, ch);
+			break;
+		/* Pre-processing number */
+		DIGIT
+		ppnum:
+			ppnum(&v, ch);
 			break;
 		/* Character */
 		case '\'':

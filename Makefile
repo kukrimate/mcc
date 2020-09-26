@@ -1,7 +1,7 @@
 CFLAGS := -std=c99 -Wall -Wextra -Wpedantic
 
 MCC := mcc
-OBJ := src/mcc.o src/cpp.o
+OBJ := src/mcc.o src/cpp/lex.o
 
 all: $(MCC)
 

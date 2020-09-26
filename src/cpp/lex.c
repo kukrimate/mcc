@@ -1,12 +1,56 @@
 /*
- * C pre-processor
+ * Lexical analyzer for the C pre-processor
  */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "chvec.h"
-#include "mcc.h"
-#include "cpp.h"
+#include "../chvec.h"
+#include "../mcc.h"
+#include "lex.h"
+
+/*
+ * Macros to help with character recognition
+ */
+
+/* ASCII whitespace character */
+#define WHITESPACE \
+	case ' ':case '\n':case '\r':case '\t':case '\v':case '\f':
+
+/* Non-digit characters used in identifiers */
+#define NONDIGIT \
+	case '_':case 'a':case 'b':case 'c':case 'd':case 'e':case 'f':\
+	case 'g':case 'h':case 'i':case 'j':case 'k':case 'l':case 'm':\
+	case 'n':case 'o':case 'p':case 'q':case 'r':case 's':case 't':\
+	case 'u':case 'v':case 'w':case 'x':case 'y':case 'z':case 'A':\
+	case 'B':case 'C':case 'D':case 'E':case 'F':case 'G':case 'H':\
+	case 'I':case 'J':case 'K':case 'L':case 'M':case 'N':case 'O':\
+	case 'P':case 'Q':case 'R':case 'S':case 'T':case 'U':case 'V':\
+	case 'W':case 'X':case 'Y':case 'Z':
+
+/* Octal digits */
+#define ODIGIT \
+	case '0':case '1':case '2':case '3':case '4':case '5':case '6':\
+	case '7':
+
+/* Decimal digits */
+#define DIGIT \
+	case '0':case '1':case '2':case '3':case '4':case '5':case '6':\
+	case '7':case '8':case '9':
+
+/* Hexadecimal digits */
+#define HDIGIT \
+	case '0':case '1':case '2':case '3':case '4':case '5':case '6':\
+	case '7':case '8':case '9':case 'a':case 'b':case 'c':case 'd':\
+	case 'e':case 'f':case 'A':case 'B':case 'C':case 'D':case 'E':\
+	case 'F':
+
+/* Characters used to build punctuators */
+#define PUNCTUATOR \
+	case '[':case ']':case '(':case ')':case '{':case '}':case '<':\
+	case '>':case '.':case '-':case '+':case '&':case '*':case '~':\
+	case '!':case '/':case '%':case '=':case '?':case ':':case ';':\
+	case ',':case '^':case '|':case '#':
+
 
 static
 void
@@ -310,86 +354,91 @@ punctuator(struct chvec *v, int ch)
 	tmp = !tmp; /* Make gcc shut up */
 }
 
-void
-cpp_tokenize(void)
+_Bool
+next_token(struct tok *tok, _Bool header_mode)
 {
-	struct chvec v;
 	int ch;
+	struct chvec v;
 
-	chvec_init(&v);
-	while ((ch = mgetc()) != EOF) {
-		if (ch == '/') {
+	/* Skip comments and whitespaces */
+	for (;;)
+		switch (ch = mgetc()) {
+		WHITESPACE
+			continue;
+		case '/':
 			/* New style comment */
 			if (mnext('/') == '/') {
 				while (ch = mgetc(),
-					ch != '\n' && ch != EOF);
+					ch != EOF && ch != '\n');
 				continue;
 			}
 			/* Old style comment */
 			if (mnext('*') == '*') {
-				while (ch = mgetc(),
+				while (ch = mgetc(), ch != EOF &&
 					!(ch == '*' && mnext('/') == '/'));
 				continue;
 			}
-		}
-
-		/* Wide string and char literals */
-		if (ch == 'L')
-			switch (mpeek()) {
-			case '\'':
-				chvec_add(&v, 'L');
-				ch = mgetc();
-				goto charlit;
-			case '"':
-				chvec_add(&v, 'L');
-				ch = mgetc();
-				goto strlit;
-			}
-
-		/* Optional . in front of ppnums */
-		if (ch == '.')
-			switch (mpeek()) {
-			DIGIT
-				chvec_add(&v, '.');
-				ch = mgetc();
-				goto ppnum;
-			}
-
-		switch (ch) {
-		/* Whitespace */
-		WHITESPACE
-			continue;
-		/* Identifier */
-		NONDIGIT
-			identifier(&v, ch);
-			break;
-		/* Pre-processing number */
-		DIGIT
-		ppnum:
-			ppnum(&v, ch);
-			break;
-		/* Character */
-		case '\'':
-		charlit:
-			character(&v, ch);
-			break;
-		/* String */
-		case '"':
-		strlit:
-			string(&v, ch);
-			break;
-		/* Punctuator */
-		PUNCTUATOR
-			punctuator(&v, ch);
-			break;
-		/* Invalid token */
 		default:
-			cpp_err();
+			goto endloop;
+		}
+endloop:
+	if (ch == EOF)
+		return 0;
+
+	/* Initialize vector to store tokens */
+	chvec_init(&v);
+
+	/* Wide string and char literals */
+	if (ch == 'L')
+		switch (mpeek()) {
+		case '\'':
+			chvec_add(&v, 'L');
+			ch = mgetc();
+			goto charlit;
+		case '"':
+			chvec_add(&v, 'L');
+			ch = mgetc();
+			goto strlit;
 		}
 
-		/* Print token */
-		printf("%s\n", chvec_str(&v));
-		/* Clear vector */
-		v.n = 0;
+	/* Optional . in front of ppnums */
+	if (ch == '.')
+		switch (mpeek()) {
+		DIGIT
+			chvec_add(&v, '.');
+			ch = mgetc();
+			goto ppnum;
+		}
+
+	switch (ch) {
+	/* Identifier */
+	NONDIGIT
+		identifier(&v, ch);
+		break;
+	/* Pre-processing number */
+	DIGIT
+	ppnum:
+		ppnum(&v, ch);
+		break;
+	/* Character */
+	case '\'':
+	charlit:
+		character(&v, ch);
+		break;
+	/* String */
+	case '"':
+	strlit:
+		string(&v, ch);
+		break;
+	/* Punctuator */
+	PUNCTUATOR
+		punctuator(&v, ch);
+		break;
+	/* Invalid token */
+	default:
+		cpp_err();
 	}
+
+	tok->data = chvec_str(&v);
+	return 1;
 }

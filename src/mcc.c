@@ -3,7 +3,8 @@
  */
 
 #include <stdio.h>
-#include "cpp.h"
+#include <stdlib.h>
+#include "cpp/lex.h"
 #include "mcc.h"
 
 static FILE *fp;
@@ -79,6 +80,8 @@ mnext(int want)
 int
 main(int argc, char *argv[])
 {
+	struct tok tok;
+
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s file\n", argv[0]);
 		return 1;
@@ -90,7 +93,10 @@ main(int argc, char *argv[])
 		return 1;
 	}
 
-	cpp_tokenize();
+	while (next_token(&tok, 0)) {
+		printf("%s\n", tok.data);
+		free(tok.data);
+	}
 
 	fclose(fp);
 	return 0;

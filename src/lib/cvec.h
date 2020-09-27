@@ -1,22 +1,22 @@
 /*
  * Character vector, header-only, hopefully fully inlined
  */
-#ifndef CHVEC_H
-#define CHVEC_H
+#ifndef CVEC_H
+#define CVEC_H
 
-struct chvec {
+struct cvec {
 	char *arr;
 	size_t len, n;
 };
 
-static inline void chvec_init(struct chvec *x)
+static inline void cvec_init(struct cvec *x)
 {
 	(x)->n = 0;
 	(x)->len = 10;
 	(x)->arr = malloc((x)->len);
 }
 
-static inline void chvec_add(struct chvec *x, int ch)
+static inline void cvec_add(struct cvec *x, int ch)
 {
 	if (x->len < ++x->n) {
 		x->len = x->n * 2;
@@ -25,9 +25,9 @@ static inline void chvec_add(struct chvec *x, int ch)
 	x->arr[x->n - 1] = ch;
 }
 
-static inline char *chvec_str(struct chvec *x)
+static inline char *cvec_str(struct cvec *x)
 {
-	chvec_add(x, 0);
+	cvec_add(x, 0);
 	return x->arr;
 }
 

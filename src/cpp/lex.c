@@ -4,17 +4,26 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "../chvec.h"
+#include <cvec.h>
 #include "../mcc.h"
 #include "lex.h"
 
 /*
+ * Token type to string
+ */
+const char *toktype_str[] = {
+	"Newline",
+	"Header-name",
+	"Identifier",
+	"Pre-processing number",
+	"Character constant",
+	"String literal",
+	"Punctuator"
+};
+
+/*
  * Macros to help with character recognition
  */
-
-/* ASCII whitespace character */
-#define WHITESPACE \
-	case ' ':case '\n':case '\r':case '\t':case '\v':case '\f':
 
 /* Non-digit characters used in identifiers */
 #define NONDIGIT \
@@ -62,15 +71,15 @@ cpp_err(void)
 
 static
 void
-identifier(struct chvec *v, int ch)
+identifier(struct cvec *v, int ch)
 {
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 	for (;;)
 		switch (mpeek()) {
 		/* Identifier character */
 		NONDIGIT
 		DIGIT
-			chvec_add(v, mgetc());
+			cvec_add(v, mgetc());
 			break;
 		/* End of identifier */
 		default:
@@ -80,9 +89,9 @@ identifier(struct chvec *v, int ch)
 
 static
 void
-ppnum(struct chvec *v, int ch)
+ppnum(struct cvec *v, int ch)
 {
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 	for (;;) {
 		switch(mpeek()) {
 		/* Letters, numbers, _ and . */
@@ -90,7 +99,7 @@ ppnum(struct chvec *v, int ch)
 		DIGIT
 		case '.':
 			ch = mgetc();
-			chvec_add(v, ch);
+			cvec_add(v, ch);
 
 			/* Check for exponent */
 			switch (ch) {
@@ -101,7 +110,7 @@ ppnum(struct chvec *v, int ch)
 				switch (mpeek()) {
 				case '+':
 				case '-':
-					chvec_add(v, mgetc());
+					cvec_add(v, mgetc());
 					break;
 				}
 			}
@@ -114,7 +123,7 @@ ppnum(struct chvec *v, int ch)
 
 static
 void
-octal(struct chvec *v, int ch)
+octal(struct cvec *v, int ch)
 {
 	ch -= '0';
 	/* Octal constants only allow 3 digits max */
@@ -133,7 +142,7 @@ octal(struct chvec *v, int ch)
 		break;
 	}
 endc:
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 }
 
 static
@@ -154,7 +163,7 @@ hexdigit_to_int(int ch)
 
 static
 void
-hexadecimal(struct chvec *v)
+hexadecimal(struct cvec *v)
 {
 	int ch;
 
@@ -170,40 +179,40 @@ hexadecimal(struct chvec *v)
 			goto endloop;
 		}
 endloop:
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 }
 
 static
 void
-escseq(struct chvec *v, int ch)
+escseq(struct cvec *v, int ch)
 {
 	switch (ch = mgetc()) {
 	case '\'':	/* Simple escape sequences */
 	case '"':
 	case '?':
 	case '\\':
-		chvec_add(v, ch);
+		cvec_add(v, ch);
 		break;
 	case 'a':
-		chvec_add(v, '\a');
+		cvec_add(v, '\a');
 		break;
 	case 'b':
-		chvec_add(v, '\b');
+		cvec_add(v, '\b');
 		break;
 	case 'f':
-		chvec_add(v, '\f');
+		cvec_add(v, '\f');
 		break;
 	case 'n':
-		chvec_add(v, '\n');
+		cvec_add(v, '\n');
 		break;
 	case 'r':
-		chvec_add(v, '\r');
+		cvec_add(v, '\r');
 		break;
 	case 't':
-		chvec_add(v, '\t');
+		cvec_add(v, '\t');
 		break;
 	case 'v':
-		chvec_add(v, '\v');
+		cvec_add(v, '\v');
 		break;
 	ODIGIT		/* Octal */
 		octal(v, ch);
@@ -219,15 +228,15 @@ escseq(struct chvec *v, int ch)
 
 static
 void
-character(struct chvec *v, int ch)
+character(struct cvec *v, int ch)
 {
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 	for (;;) {
 		ch = mgetc();
 		switch (ch) {
 		/* Normal character */
 		default:
-			chvec_add(v, ch);
+			cvec_add(v, ch);
 			if (ch == '\'') /* End of character constant */
 				return;
 			break;
@@ -245,15 +254,15 @@ character(struct chvec *v, int ch)
 
 static
 void
-string(struct chvec *v, int ch)
+string(struct cvec *v, int ch)
 {
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 	for (;;) {
 		ch = mgetc();
 		switch (ch) {
 		/* Normal character */
 		default:
-			chvec_add(v, ch);
+			cvec_add(v, ch);
 			if (ch == '"') /* End of string */
 				return;
 			break;
@@ -271,10 +280,10 @@ string(struct chvec *v, int ch)
 
 static
 _Bool
-ifadd(struct chvec *v, int ch)
+ifadd(struct cvec *v, int ch)
 {
 	if (mnext(ch) == ch) {
-		chvec_add(v, ch);
+		cvec_add(v, ch);
 		return 1;
 	}
 	return 0;
@@ -282,7 +291,7 @@ ifadd(struct chvec *v, int ch)
 
 static
 void
-punctuator(struct chvec *v, int ch)
+punctuator(struct cvec *v, int ch)
 {
 	_Bool tmp;
 
@@ -296,7 +305,7 @@ punctuator(struct chvec *v, int ch)
 		, # ##
 	*/
 
-	chvec_add(v, ch);
+	cvec_add(v, ch);
 	switch (ch) {
 	/* Always single */
 	case '[':
@@ -358,12 +367,17 @@ _Bool
 next_token(struct tok *tok, _Bool header_mode)
 {
 	int ch;
-	struct chvec v;
+	struct cvec v;
 
 	/* Skip comments and whitespaces */
 	for (;;)
 		switch (ch = mgetc()) {
-		WHITESPACE
+		/* Whitespace except newline */
+		case ' ':
+		case '\r':
+		case '\t':
+		case '\v':
+		case '\f':
 			continue;
 		case '/':
 			/* New style comment */
@@ -386,17 +400,17 @@ endloop:
 		return 0;
 
 	/* Initialize vector to store tokens */
-	chvec_init(&v);
+	cvec_init(&v);
 
 	/* Wide string and char literals */
 	if (ch == 'L')
 		switch (mpeek()) {
 		case '\'':
-			chvec_add(&v, 'L');
+			cvec_add(&v, 'L');
 			ch = mgetc();
 			goto charlit;
 		case '"':
-			chvec_add(&v, 'L');
+			cvec_add(&v, 'L');
 			ch = mgetc();
 			goto strlit;
 		}
@@ -405,33 +419,42 @@ endloop:
 	if (ch == '.')
 		switch (mpeek()) {
 		DIGIT
-			chvec_add(&v, '.');
+			cvec_add(&v, '.');
 			ch = mgetc();
 			goto ppnum;
 		}
 
 	switch (ch) {
+	/* Newline */
+	case '\n':
+		tok->type = NLINE;
+		break;
 	/* Identifier */
 	NONDIGIT
+		tok->type = IDENT;
 		identifier(&v, ch);
 		break;
 	/* Pre-processing number */
 	DIGIT
 	ppnum:
+		tok->type = PPNUM;
 		ppnum(&v, ch);
 		break;
 	/* Character */
 	case '\'':
 	charlit:
+		tok->type = CHARC;
 		character(&v, ch);
 		break;
 	/* String */
 	case '"':
 	strlit:
+		tok->type = STLIT;
 		string(&v, ch);
 		break;
 	/* Punctuator */
 	PUNCTUATOR
+		tok->type = PUNCT;
 		punctuator(&v, ch);
 		break;
 	/* Invalid token */
@@ -439,6 +462,6 @@ endloop:
 		cpp_err();
 	}
 
-	tok->data = chvec_str(&v);
+	tok->data = cvec_str(&v);
 	return 1;
 }

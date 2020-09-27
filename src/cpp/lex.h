@@ -11,16 +11,28 @@ enum toktype {
 	HNAME,	/* Header-name */
 	IDENT,	/* Identifier */
 	PPNUM,	/* Pre-processing number */
-	CHARC,	/* Character constant*/
+	CHARC,	/* Character constant */
 	STLIT,	/* String literal */
 	PUNCT,	/* Punctuator */
 };
 
+/*
+ * Token type to string
+ */
+extern
+const char *toktype_str[];
+
+/*
+ * Represents a token as fed into the pre-processor
+ */
 struct tok {
 	/* Type of token */
 	enum toktype type;
 	/* Token data */
 	char *data;
+	/* Next pointer to build a linked list,
+	 * not used by the lexer */
+	struct tok *next;
 };
 
 /*

@@ -1,4 +1,7 @@
-CFLAGS := -Isrc/lib -Isrc/cpp -std=c99 -Wall -Wextra -Wpedantic
+# Turn on all warnings and disable insane ones explicitly
+CFLAGS := -Isrc/lib -Isrc/cpp -std=c99 \
+	-Wall -Wextra -Wpedantic \
+	-Wno-implicit-fallthrough
 
 MCC := mcc
 OBJ := src/lib/djb2.o \

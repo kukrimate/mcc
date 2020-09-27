@@ -1,5 +1,5 @@
 /*
- * Character vector, header-only, hopefully fully inlined
+ * Character vector
  */
 #ifndef CVEC_H
 #define CVEC_H
@@ -11,9 +11,9 @@ struct cvec {
 
 static inline void cvec_init(struct cvec *x)
 {
-	(x)->n = 0;
-	(x)->len = 10;
-	(x)->arr = malloc((x)->len);
+	x->n = 0;
+	x->len = 10;
+	x->arr = malloc(x->len);
 }
 
 static inline void cvec_add(struct cvec *x, int ch)

@@ -30,9 +30,6 @@ struct tok {
 	enum toktype type;
 	/* Token data */
 	char *data;
-	/* Next pointer to build a linked list,
-	 * not used by the lexer */
-	struct tok *next;
 };
 
 /*

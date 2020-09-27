@@ -63,10 +63,28 @@ const char *toktype_str[] = {
 
 static
 void
-cpp_err(void)
+lex_err(void)
 {
 	fprintf(stderr, "Lexer error!\n");
 	exit(1);
+}
+
+static
+void
+header_name(struct cvec *v, int ch)
+{
+	int endch;
+
+	endch = ch == '<' ? '>' : '"';
+	cvec_add(v, ch);
+	for (;;) {
+		ch = mgetc();
+		if (ch == EOF || ch == '\n')
+			lex_err();
+		cvec_add(v, ch);
+		if (ch == endch)
+			return;
+	}
 }
 
 static
@@ -157,7 +175,7 @@ hexdigit_to_int(int ch)
 	if (ch >= 'A' && ch <= 'F')
 		return 10 + (ch - 'A');
 	/* Not a valid hex digit */
-	cpp_err();
+	lex_err();
 	return 0; /* Never reached, but makes gcc shut up */
 }
 
@@ -222,7 +240,7 @@ escseq(struct cvec *v, int ch)
 		break;
 	/* Invalid escape sequence */
 	default:
-		cpp_err();
+		lex_err();
 	}
 }
 
@@ -247,7 +265,7 @@ character(struct cvec *v, int ch)
 		/* Invalid character constant */
 		case EOF:
 		case '\n':
-			cpp_err();
+			lex_err();
 		}
 	}
 }
@@ -273,7 +291,7 @@ string(struct cvec *v, int ch)
 		/* Invalid string */
 		case EOF:
 		case '\n':
-			cpp_err();
+			lex_err();
 		}
 	}
 }
@@ -353,11 +371,11 @@ punctuator(struct cvec *v, int ch)
 	case '.':
 		tmp = ifadd(v, '.') && !ifadd(v, '.');
 		if (tmp) /* The only valid combined . punctuator is ... */
-			cpp_err();
+			lex_err();
 		break;
 	default: /* Invalid punctuator, this should never be able to happen,
 			left here to sanity check for bugs */
-		cpp_err();
+		lex_err();
 	}
 
 	tmp = !tmp; /* Make gcc shut up */
@@ -401,6 +419,14 @@ endloop:
 
 	/* Initialize vector to store tokens */
 	cvec_init(&v);
+
+	/* If header mode is enable it overrides everything */
+	if (header_mode && (ch == '<' || ch == '<')) {
+		tok->type = HNAME;
+		header_name(&v, ch);
+		goto end;
+
+	}
 
 	/* Wide string and char literals */
 	if (ch == 'L')
@@ -459,9 +485,10 @@ endloop:
 		break;
 	/* Invalid token */
 	default:
-		cpp_err();
+		lex_err();
 	}
 
+end:
 	tok->data = cvec_str(&v);
 	return 1;
 }

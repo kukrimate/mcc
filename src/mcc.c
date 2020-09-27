@@ -2,6 +2,8 @@
  * mcc main file
  */
 
+#define _GNU_SOURCE
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "cpp/cpp.h"

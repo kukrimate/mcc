@@ -4,9 +4,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <cvec.h>
+#include <string.h>
+#include <vec.h>
+VEC_DEF(char, c)
 #include "../mcc.h"
 #include "lex.h"
+
 
 /*
  * Token type to string

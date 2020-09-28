@@ -384,7 +384,7 @@ punctuator(struct cvec *v, int ch)
 	tmp = !tmp; /* Make gcc shut up */
 }
 
-_Bool
+void
 next_token(struct tok *tok, _Bool header_mode)
 {
 	int ch;
@@ -417,8 +417,6 @@ next_token(struct tok *tok, _Bool header_mode)
 			goto endloop;
 		}
 endloop:
-	if (ch == EOF)
-		return 0;
 
 	/* Initialize vector to store tokens */
 	cvec_init(&v);
@@ -454,6 +452,10 @@ endloop:
 		}
 
 	switch (ch) {
+	/* End of file */
+	case EOF:
+		tok->type = EFILE;
+		break;
 	/* Newline */
 	case '\n':
 		tok->type = NLINE;
@@ -492,6 +494,5 @@ endloop:
 	}
 
 end:
-	tok->data = cvec_str(&v);
-	return 1;
+	tok->data = cvec_arr(&v);
 }

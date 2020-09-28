@@ -7,7 +7,8 @@
  * the pre-processor to use a side-channel to retrieve when a macro ends
  */
 enum toktype {
-	NLINE,	/* Newline */
+	EFILE,	/* End of file */
+	NLINE,	/* End of line */
 	HNAME,	/* Header-name */
 	IDENT,	/* Identifier */
 	PPNUM,	/* Pre-processing number */
@@ -37,10 +38,8 @@ struct tok {
  * If header_mode is true, the lexer will recognize header name tokens
  * Note that lexer having to recognize header names is an utter violation of
  * layering, but it's C design mistake that can't really be avoided
- * This function returns true if a token was successfully recognized, it
- * returns false if it reached the end of the input file
  */
-_Bool
+void
 next_token(struct tok *tok, _Bool header_mode);
 
 #endif

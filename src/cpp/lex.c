@@ -422,7 +422,7 @@ endloop:
 	cvec_init(&v);
 
 	/* If header mode is enable it overrides everything */
-	if (header_mode && (ch == '<' || ch == '<')) {
+	if (header_mode && (ch == '<' || ch == '"')) {
 		tok->type = HNAME;
 		header_name(&v, ch);
 		goto end;

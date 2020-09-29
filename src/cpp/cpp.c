@@ -23,19 +23,19 @@ cpp_err(void)
 
 static
 void
-include(void)
+include(FILE *fp)
 {
 	struct tok token;
 
 	/* Read header name */
-	next_token(&token, 1);
+	next_token(fp, &token, 1);
 	if (token.type != HNAME)
 		cpp_err();
 	printf("Included: %s\n", token.data);
 	free(token.data);
 
 	/* #include directive must not have more tokens */
-	next_token(&token, 0);
+	next_token(fp, &token, 0);
 	if (!IS_EDIR(&token))
 		cpp_err();
 	free(token.data);
@@ -43,13 +43,13 @@ include(void)
 
 static
 void
-directive(void)
+directive(FILE *fp)
 {
 	struct tok token;
 	struct mdef macro;
 
 	/* Empty directives are just ignored */
-	next_token(&token, 0);
+	next_token(fp, &token, 0);
 	if (IS_EDIR(&token))
 		return;
 
@@ -59,9 +59,9 @@ directive(void)
 
 	/* Process directive */
 	if (!strcmp(token.data, "include"))
-		include();
+		include(fp);
 	else if (!strcmp(token.data, "define")) {
-		define(&macro);
+		define(fp, &macro);
 		free_macro(&macro);
 	} else
 		cpp_err();
@@ -70,7 +70,7 @@ directive(void)
 }
 
 void
-preprocess(void)
+preprocess(FILE *fp)
 {
 	_Bool allow_dir;	/* Allow directives */
 	struct tok token;	/* Current token */
@@ -79,7 +79,7 @@ preprocess(void)
 	allow_dir = 1;
 
 	for (;;) {
-		next_token(&token, 0);
+		next_token(fp, &token, 0);
 		switch (token.type) {
 		case EFILE:
 			free(token.data);
@@ -90,7 +90,7 @@ preprocess(void)
 		case PUNCT:
 			/* Found a pre-processing directive */
 			if (allow_dir && !strcmp(token.data, "#")) {
-				directive();
+				directive(fp);
 				break;
 			}
 		default:

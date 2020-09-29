@@ -24,7 +24,7 @@ struct mdef {
 };
 
 void
-define(struct mdef *macro);
+define(FILE *fp, struct mdef *macro);
 
 void
 free_macro(struct mdef *macro);

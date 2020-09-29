@@ -40,6 +40,6 @@ struct tok {
  * layering, but it's C design mistake that can't really be avoided
  */
 void
-next_token(struct tok *tok, _Bool header_mode);
+next_token(FILE *fp, struct tok *tok, _Bool header_mode);
 
 #endif

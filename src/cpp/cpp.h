@@ -5,6 +5,6 @@ void
 cpp_err(void);
 
 void
-preprocess(void);
+preprocess(FILE *fp);
 
 #endif

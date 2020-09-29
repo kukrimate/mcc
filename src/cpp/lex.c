@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vec.h>
-VEC_DEF(char, c)
-#include "../mcc.h"
+#include "io.h"
 #include "lex.h"
 
+VEC_DEF(char, c)
 
 /*
  * Token type to string
@@ -74,14 +74,14 @@ lex_err(void)
 
 static
 void
-header_name(struct cvec *v, int ch)
+header_name(FILE *fp, struct cvec *v, int ch)
 {
 	int endch;
 
 	endch = ch == '<' ? '>' : '"';
 	cvec_add(v, ch);
 	for (;;) {
-		ch = mgetc();
+		ch = mgetc(fp);
 		if (ch == EOF || ch == '\n')
 			lex_err();
 		cvec_add(v, ch);
@@ -92,15 +92,15 @@ header_name(struct cvec *v, int ch)
 
 static
 void
-identifier(struct cvec *v, int ch)
+identifier(FILE *fp, struct cvec *v, int ch)
 {
 	cvec_add(v, ch);
 	for (;;)
-		switch (mpeek()) {
+		switch (mpeek(fp)) {
 		/* Identifier character */
 		NONDIGIT
 		DIGIT
-			cvec_add(v, mgetc());
+			cvec_add(v, mgetc(fp));
 			break;
 		/* End of identifier */
 		default:
@@ -110,16 +110,16 @@ identifier(struct cvec *v, int ch)
 
 static
 void
-ppnum(struct cvec *v, int ch)
+ppnum(FILE *fp, struct cvec *v, int ch)
 {
 	cvec_add(v, ch);
 	for (;;) {
-		switch(mpeek()) {
+		switch(mpeek(fp)) {
 		/* Letters, numbers, _ and . */
 		NONDIGIT
 		DIGIT
 		case '.':
-			ch = mgetc();
+			ch = mgetc(fp);
 			cvec_add(v, ch);
 
 			/* Check for exponent */
@@ -128,10 +128,10 @@ ppnum(struct cvec *v, int ch)
 			case 'E':
 			case 'p':
 			case 'P':
-				switch (mpeek()) {
+				switch (mpeek(fp)) {
 				case '+':
 				case '-':
-					cvec_add(v, mgetc());
+					cvec_add(v, mgetc(fp));
 					break;
 				}
 			}
@@ -144,22 +144,22 @@ ppnum(struct cvec *v, int ch)
 
 static
 void
-octal(struct cvec *v, int ch)
+octal(FILE *fp, struct cvec *v, int ch)
 {
 	ch -= '0';
 	/* Octal constants only allow 3 digits max */
-	switch (mpeek()) {
+	switch (mpeek(fp)) {
 	ODIGIT
 		ch <<= 3;
-		ch |= mgetc() - '0';
+		ch |= mgetc(fp) - '0';
 		break;
 	default:
 		goto endc;
 	}
-	switch (mpeek()) {
+	switch (mpeek(fp)) {
 	ODIGIT
 		ch <<= 3;
-		ch |= mgetc() - '0';
+		ch |= mgetc(fp) - '0';
 		break;
 	}
 endc:
@@ -184,17 +184,17 @@ hexdigit_to_int(int ch)
 
 static
 void
-hexadecimal(struct cvec *v)
+hexadecimal(FILE *fp, struct cvec *v)
 {
 	int ch;
 
 	ch = 0;
 	/* Hex constants can be any length */
 	for (;;)
-		switch (mpeek()) {
+		switch (mpeek(fp)) {
 		HDIGIT
 			ch <<= 4;
-			ch |= hexdigit_to_int(mgetc());
+			ch |= hexdigit_to_int(mgetc(fp));
 			break;
 		default:
 			goto endloop;
@@ -205,9 +205,9 @@ endloop:
 
 static
 void
-escseq(struct cvec *v, int ch)
+escseq(FILE *fp, struct cvec *v, int ch)
 {
-	switch (ch = mgetc()) {
+	switch (ch = mgetc(fp)) {
 	case '\'':	/* Simple escape sequences */
 	case '"':
 	case '?':
@@ -236,10 +236,10 @@ escseq(struct cvec *v, int ch)
 		cvec_add(v, '\v');
 		break;
 	ODIGIT		/* Octal */
-		octal(v, ch);
+		octal(fp, v, ch);
 		break;
 	case 'x':	/* Hexadecimal */
-		hexadecimal(v);
+		hexadecimal(fp, v);
 		break;
 	/* Invalid escape sequence */
 	default:
@@ -249,11 +249,11 @@ escseq(struct cvec *v, int ch)
 
 static
 void
-character(struct cvec *v, int ch)
+character(FILE *fp, struct cvec *v, int ch)
 {
 	cvec_add(v, ch);
 	for (;;) {
-		ch = mgetc();
+		ch = mgetc(fp);
 		switch (ch) {
 		/* Normal character */
 		default:
@@ -263,7 +263,7 @@ character(struct cvec *v, int ch)
 			break;
 		/* Escape sequence */
 		case '\\':
-			escseq(v, ch);
+			escseq(fp, v, ch);
 			break;
 		/* Invalid character constant */
 		case EOF:
@@ -275,11 +275,11 @@ character(struct cvec *v, int ch)
 
 static
 void
-string(struct cvec *v, int ch)
+string(FILE *fp, struct cvec *v, int ch)
 {
 	cvec_add(v, ch);
 	for (;;) {
-		ch = mgetc();
+		ch = mgetc(fp);
 		switch (ch) {
 		/* Normal character */
 		default:
@@ -289,7 +289,7 @@ string(struct cvec *v, int ch)
 			break;
 		/* Escape sequence */
 		case '\\':
-			escseq(v, ch);
+			escseq(fp, v, ch);
 			break;
 		/* Invalid string */
 		case EOF:
@@ -301,9 +301,9 @@ string(struct cvec *v, int ch)
 
 static
 _Bool
-ifadd(struct cvec *v, int ch)
+ifadd(FILE *fp, struct cvec *v, int ch)
 {
-	if (mnext(ch) == ch) {
+	if (mnext(fp, ch) == ch) {
 		cvec_add(v, ch);
 		return 1;
 	}
@@ -312,7 +312,7 @@ ifadd(struct cvec *v, int ch)
 
 static
 void
-punctuator(struct cvec *v, int ch)
+punctuator(FILE *fp, struct cvec *v, int ch)
 {
 	_Bool tmp;
 
@@ -343,22 +343,22 @@ punctuator(struct cvec *v, int ch)
 		return;
 	/* Can combine */
 	case '<':
-		tmp = ifadd(v, '=') || (ifadd(v, '<') && ifadd(v, '='));
+		tmp = ifadd(fp, v, '=') || (ifadd(fp, v, '<') && ifadd(fp, v, '='));
 		break;
 	case '>':
-		tmp = ifadd(v, '=') || (ifadd(v, '>') && ifadd(v, '='));
+		tmp = ifadd(fp, v, '=') || (ifadd(fp, v, '>') && ifadd(fp, v, '='));
 		break;
 	case '+':
-		tmp = ifadd(v, '=') || ifadd(v, '+');
+		tmp = ifadd(fp, v, '=') || ifadd(fp, v, '+');
 		break;
 	case '-':
-		tmp = ifadd(v, '=') || ifadd(v, '-') || ifadd(v, '>');
+		tmp = ifadd(fp, v, '=') || ifadd(fp, v, '-') || ifadd(fp, v, '>');
 		break;
 	case '&':
-		tmp = ifadd(v, '=') || ifadd(v, '&');
+		tmp = ifadd(fp, v, '=') || ifadd(fp, v, '&');
 		break;
 	case '|':
-		tmp = ifadd(v, '=') || ifadd(v, '|');
+		tmp = ifadd(fp, v, '=') || ifadd(fp, v, '|');
 		break;
 	case '!':
 	case '=':
@@ -366,13 +366,13 @@ punctuator(struct cvec *v, int ch)
 	case '*':
 	case '/':
 	case '%':
-		tmp = ifadd(v, '=');
+		tmp = ifadd(fp, v, '=');
 		break;
 	case '#':
-		ifadd(v, '#');
+		ifadd(fp, v, '#');
 		break;
 	case '.':
-		tmp = ifadd(v, '.') && !ifadd(v, '.');
+		tmp = ifadd(fp, v, '.') && !ifadd(fp, v, '.');
 		if (tmp) /* The only valid combined . punctuator is ... */
 			lex_err();
 		break;
@@ -385,14 +385,14 @@ punctuator(struct cvec *v, int ch)
 }
 
 void
-next_token(struct tok *tok, _Bool header_mode)
+next_token(FILE *fp, struct tok *tok, _Bool header_mode)
 {
 	int ch;
 	struct cvec v;
 
 	/* Skip comments and whitespaces */
 	for (;;)
-		switch (ch = mgetc()) {
+		switch (ch = mgetc(fp)) {
 		/* Whitespace except newline */
 		case ' ':
 		case '\r':
@@ -402,15 +402,15 @@ next_token(struct tok *tok, _Bool header_mode)
 			continue;
 		case '/':
 			/* New style comment */
-			if (mnext('/') == '/') {
-				while (ch = mgetc(),
+			if (mnext(fp, '/') == '/') {
+				while (ch = mgetc(fp),
 					ch != EOF && ch != '\n');
 				continue;
 			}
 			/* Old style comment */
-			if (mnext('*') == '*') {
-				while (ch = mgetc(), ch != EOF &&
-					!(ch == '*' && mnext('/') == '/'));
+			if (mnext(fp, '*') == '*') {
+				while (ch = mgetc(fp), ch != EOF &&
+					!(ch == '*' && mnext(fp, '/') == '/'));
 				continue;
 			}
 		default:
@@ -424,30 +424,30 @@ endloop:
 	/* If header mode is enable it overrides everything */
 	if (header_mode && (ch == '<' || ch == '"')) {
 		tok->type = HNAME;
-		header_name(&v, ch);
+		header_name(fp, &v, ch);
 		goto end;
 
 	}
 
 	/* Wide string and char literals */
 	if (ch == 'L')
-		switch (mpeek()) {
+		switch (mpeek(fp)) {
 		case '\'':
 			cvec_add(&v, 'L');
-			ch = mgetc();
+			ch = mgetc(fp);
 			goto charlit;
 		case '"':
 			cvec_add(&v, 'L');
-			ch = mgetc();
+			ch = mgetc(fp);
 			goto strlit;
 		}
 
 	/* Optional . in front of ppnums */
 	if (ch == '.')
-		switch (mpeek()) {
+		switch (mpeek(fp)) {
 		DIGIT
 			cvec_add(&v, '.');
-			ch = mgetc();
+			ch = mgetc(fp);
 			goto ppnum;
 		}
 
@@ -463,30 +463,30 @@ endloop:
 	/* Identifier */
 	NONDIGIT
 		tok->type = IDENT;
-		identifier(&v, ch);
+		identifier(fp, &v, ch);
 		break;
 	/* Pre-processing number */
 	DIGIT
 	ppnum:
 		tok->type = PPNUM;
-		ppnum(&v, ch);
+		ppnum(fp, &v, ch);
 		break;
 	/* Character */
 	case '\'':
 	charlit:
 		tok->type = CHARC;
-		character(&v, ch);
+		character(fp, &v, ch);
 		break;
 	/* String */
 	case '"':
 	strlit:
 		tok->type = STLIT;
-		string(&v, ch);
+		string(fp, &v, ch);
 		break;
 	/* Punctuator */
 	PUNCTUATOR
 		tok->type = PUNCT;
-		punctuator(&v, ch);
+		punctuator(fp, &v, ch);
 		break;
 	/* Invalid token */
 	default:

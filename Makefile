@@ -7,6 +7,7 @@ MCC := mcc
 OBJ := src/lib/djb2.o \
 	src/lib/hset.o \
 	src/lib/htab.o \
+	src/cpp/io.o \
 	src/cpp/lex.o \
 	src/cpp/macro.o \
 	src/cpp/cpp.o \

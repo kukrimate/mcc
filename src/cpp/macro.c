@@ -20,7 +20,7 @@ VEC_DEF(struct rent, r)	/* Replacement list */
 #define IS_PUNCT(tok, str) ((tok)->type == PUNCT && !strcmp((tok)->data, str))
 
 void
-define(struct mdef *macro)
+define(FILE *fp, struct mdef *macro)
 {
 	/* Replacement list */
 	struct rent *rent;
@@ -40,7 +40,7 @@ define(struct mdef *macro)
 
 	/* Read macro identifier */
 	token = tvec_ptr(&stack);
-	next_token(token, 0);
+	next_token(fp, token, 0);
 	if (token->type != IDENT)
 		cpp_err();
 
@@ -49,12 +49,12 @@ define(struct mdef *macro)
 
 	/* Parse arguments for function like macro */
 	token = tvec_ptr(&stack);
-	next_token(token, 0);
+	next_token(fp, token, 0);
 	if (IS_PUNCT(token, "(")) {
 		macro->is_flike = 1;
 		for (arg = 0;;) {
 			token = tvec_ptr(&stack);
-			next_token(token, 0);
+			next_token(fp, token, 0);
 			if (IS_PUNCT(token, ","))	/* Ignore all , */
 				continue;
 			if (IS_PUNCT(token, ")"))	/* Matching ) */
@@ -64,7 +64,7 @@ define(struct mdef *macro)
 			htab_put(&args, token->data, (void *) (1 + arg++));
 		}
 		token = tvec_ptr(&stack);
-		next_token(token, 0);
+		next_token(fp, token, 0);
 	}
 
 	/* Construct replacement list */
@@ -82,7 +82,7 @@ define(struct mdef *macro)
 		}
 
 		token = tvec_ptr(&stack);
-		next_token(token, 0);
+		next_token(fp, token, 0);
 	}
 
 	/* Create arrays from vectors */

@@ -9,11 +9,6 @@
 #include "macro.h"
 #include "cpp.h"
 
-/* Does this token end a directive */
-#define IS_EDIR(tok) ((tok)->type == EFILE || (tok)->type == NLINE)
-/* Is this token the specified punctuator */
-#define IS_PUNCT(tok, str) ((tok)->type == PUNCT && !strcmp((tok)->data, str))
-
 void
 cpp_err(void)
 {
@@ -36,7 +31,7 @@ include(FILE *fp)
 
 	/* #include directive must not have more tokens */
 	next_token(fp, &token, 0);
-	if (!IS_EDIR(&token))
+	if (token.type != EFILE && token.type != NLINE)
 		cpp_err();
 	free(token.data);
 }
@@ -50,7 +45,7 @@ directive(FILE *fp)
 
 	/* Empty directives are just ignored */
 	next_token(fp, &token, 0);
-	if (IS_EDIR(&token))
+	if (token.type == EFILE || token.type == NLINE)
 		return;
 
 	/* Directive must start with an identifier */

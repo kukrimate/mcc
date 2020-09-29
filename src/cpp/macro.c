@@ -14,11 +14,6 @@
 VEC_DEF(struct tok, t)	/* Token list */
 VEC_DEF(struct rent, r)	/* Replacement list */
 
-/* Does this token end a directive */
-#define IS_EDIR(tok) ((tok)->type == EFILE || (tok)->type == NLINE)
-/* Is this token the specified punctuator */
-#define IS_PUNCT(tok, str) ((tok)->type == PUNCT && !strcmp((tok)->data, str))
-
 void
 define(FILE *fp, struct mdef *macro)
 {
@@ -68,7 +63,7 @@ define(FILE *fp, struct mdef *macro)
 	}
 
 	/* Construct replacement list */
-	while (!IS_EDIR(token)) {
+	while (token->type != EFILE && token->type != NLINE) {
 		rent = rvec_ptr(&rlist);
 		rent->tok = token;
 		rent->is_arg = 0;

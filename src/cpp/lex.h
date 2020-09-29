@@ -33,6 +33,9 @@ struct tok {
 	char *data;
 };
 
+/* Is this token the specified punctuator */
+#define IS_PUNCT(tok, str) ((tok)->type == PUNCT && !strcmp((tok)->data, str))
+
 /*
  * Get the next pre-processing token
  * If header_mode is true, the lexer will recognize header name tokens

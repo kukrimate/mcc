@@ -411,6 +411,9 @@ next_token(FILE *fp, struct tok *tok, _Bool header_mode)
 {
 	int ch;
 
+	/* Zero whitespace count */
+	tok->lwhite = 0;
+
 	/* Skip comments and whitespaces */
 	for (;;)
 		switch (ch = mgetc(fp)) {
@@ -420,16 +423,20 @@ next_token(FILE *fp, struct tok *tok, _Bool header_mode)
 		case '\t':
 		case '\v':
 		case '\f':
+			++tok->lwhite;
 			continue;
 		case '/':
+			/* NOTE: we count comments as one leading whitespace */
 			/* New style comment */
 			if (mnext(fp, '/') == '/') {
+				++tok->lwhite;
 				while (ch = mgetc(fp),
 					ch != EOF && ch != '\n');
 				continue;
 			}
 			/* Old style comment */
 			if (mnext(fp, '*') == '*') {
+				++tok->lwhite;
 				while (ch = mgetc(fp), ch != EOF &&
 					!(ch == '*' && mnext(fp, '/') == '/'));
 				continue;

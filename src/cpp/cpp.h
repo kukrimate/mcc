@@ -4,7 +4,7 @@
 /* Replacement list entry */
 struct rent {
 	/* Lexer token */
-	struct tok *tok;
+	struct tok tok;
 	/* Should this token be replaced with an argument? */
 	_Bool is_arg;
 	/* Index of the argument to replace this token with */
@@ -17,10 +17,10 @@ struct mdef {
 	const char *ident;
 	/* Is this a function like macro? */
 	_Bool is_flike;
+	/* Is this macro painted blue? */
+	_Bool is_blue;
 	/* Replacement list for this macro */
 	struct rent *rlist;
-	/* All lexer tokens consumed by parsing this macro */
-	struct tok *stack;
 };
 
 /* Token source type */

@@ -11,7 +11,6 @@
 #include "lex.h"
 #include "cpp.h"
 
-VEC_DEF(struct tok, t)
 VEC_DEF(struct rent, r)
 VEC_DEF(struct ppsrc, p)
 
@@ -43,6 +42,7 @@ cpp_pushmacro(struct mdef *macro)
 {
 	struct ppsrc *macrosrc;
 
+	macro->is_blue = 1;
 	macrosrc = pvec_ptr(&ppstack);
 	macrosrc->type = PP_MACRO;
 	macrosrc->_.macro.macro = macro;
@@ -64,12 +64,13 @@ retry:
 		break;
 	case PP_MACRO:
 		macro = src->_.macro.macro;
-		if (!macro->rlist[src->_.macro.rlist_idx].tok) {
+		if (!macro->rlist[src->_.macro.rlist_idx].tok.data) {
+			macro->is_blue = 0;
 			--ppstack.n;
 			goto retry;
 		}
 
-		*token = *macro->rlist[src->_.macro.rlist_idx].tok;
+		*token = macro->rlist[src->_.macro.rlist_idx].tok;
 		++src->_.macro.rlist_idx;
 		break;
 	}
@@ -98,13 +99,12 @@ static
 struct mdef *
 define(void)
 {
+	/* Temporary variable to hold a token */
+	struct tok token;
+
 	/* Replacement list */
 	struct rent *rent;
 	struct rvec rlist;
-
-	/* Token stack */
-	struct tok *token;
-	struct tvec stack;
 
 	/* Hash table for finding arguments */
 	struct htab args;
@@ -114,60 +114,54 @@ define(void)
 	struct mdef *macro;
 
 	rvec_init(&rlist);
-	tvec_init(&stack);
 	htab_init(&args);
 	macro = malloc(sizeof(*macro));
 
 	/* Read macro identifier */
-	token = tvec_ptr(&stack);
-	cpp_read(token, 0);
-	if (token->type != IDENT)
+	cpp_read(&token, 0);
+	if (token.type != IDENT)
 		cpp_err();
 
-	macro->ident = token->data;
+	macro->ident = token.data;
 	macro->is_flike = 0;
+	macro->is_blue = 0;
 
 	/* Parse arguments for function like macro */
-	token = tvec_ptr(&stack);
-	cpp_read(token, 0);
-	if (IS_PUNCT(token, "(")) {
+	cpp_read(&token, 0);
+	if (IS_PUNCT(&token, "(")) {
 		macro->is_flike = 1;
 		for (arg = 0;;) {
-			token = tvec_ptr(&stack);
-			cpp_read(token, 0);
-			if (IS_PUNCT(token, ","))	/* Ignore all , */
+			cpp_read(&token, 0);
+			if (IS_PUNCT(&token, ","))	/* Ignore all , */
 				continue;
-			if (IS_PUNCT(token, ")"))	/* Matching ) */
+			if (IS_PUNCT(&token, ")"))	/* Matching ) */
 				break;
-			if (token->type != IDENT)
+			if (token.type != IDENT)
 				cpp_err();
-			htab_put(&args, token->data, (void *) (1 + arg++));
+			htab_put(&args, token.data, (void *) (1 + arg++));
 		}
-		token = tvec_ptr(&stack);
-		cpp_read(token, 0);
+		cpp_read(&token, 0);
 	}
 
 	/* Construct replacement list */
-	while (token->type != EFILE && token->type != NLINE) {
+	while (token.type != EFILE && token.type != NLINE) {
 		rent = rvec_ptr(&rlist);
 		rent->tok = token;
 		rent->is_arg = 0;
 
-		if (token->type == IDENT) {
-			arg = (size_t) htab_get(&args, token->data);
+		if (token.type == IDENT) {
+			arg = (size_t) htab_get(&args, token.data);
 			if (arg) {
 				rent->is_arg = 1;
 				rent->arg = arg - 1;
 			}
 		}
 
-		token = tvec_ptr(&stack);
-		cpp_read(token, 0);
+		cpp_read(&token, 0);
 	}
 
 	/* Create arrays from vectors */
 	macro->rlist = rvec_arr(&rlist);
-	macro->stack = tvec_arr(&stack);
 
 	/* Free internally used hash-table */
 	free(args.arr);
@@ -180,7 +174,6 @@ void
 free_macro(struct mdef *macro)
 {
 	free(macro->rlist);
-	free(macro->stack);
 }
 
 static
@@ -243,7 +236,7 @@ preprocess(FILE *fp)
 			}
 		case IDENT:
 			macro = (void *) htab_get(&macros, token.data);
-			if (macro) {
+			if (macro && !macro->is_blue) {
 				cpp_pushmacro(macro);
 				break;
 			}

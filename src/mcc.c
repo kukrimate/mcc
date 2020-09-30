@@ -4,7 +4,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "cpp/cpp.h"
+
+void
+preprocess(FILE *fp);
 
 int
 main(int argc, char *argv[])

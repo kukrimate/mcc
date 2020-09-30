@@ -29,6 +29,9 @@ const char *toktype_str[];
 struct tok {
 	/* Type of token */
 	enum toktype type;
+	/* # of leading whitespaces
+	 * skipped before this token */
+	size_t lwhite;
 	/* Token data */
 	char *data;
 };

@@ -45,6 +45,10 @@ static inline type *prefix##vec_arr(struct prefix##vec *x) \
 	} \
 	memset(x->arr + x->n - 1, 0, sizeof(type)); \
 	return x->arr; \
+} \
+static inline type *prefix##vec_tail(struct prefix##vec *x) \
+{ \
+	return x->arr + x->n - 1; \
 }
 
 #endif

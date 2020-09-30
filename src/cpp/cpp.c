@@ -2,6 +2,7 @@
  * Core of the C pre-processor
  */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,29 +23,80 @@ cpp_err(void)
 	exit(1);
 }
 
+/* Pre-processor stack */
+static struct pvec ppstack;
+
 static
 void
-include(FILE *fp)
+cpp_pushfile(FILE *fp)
+{
+	struct ppsrc *filesrc;
+
+	filesrc = pvec_ptr(&ppstack);
+	filesrc->type = PP_FILE;
+	filesrc->_.file.fp = fp;
+}
+
+static
+void
+cpp_pushmacro(struct mdef *macro)
+{
+	struct ppsrc *macrosrc;
+
+	macrosrc = pvec_ptr(&ppstack);
+	macrosrc->type = PP_MACRO;
+	macrosrc->_.macro.macro = macro;
+	macrosrc->_.macro.rlist_idx = 0;
+}
+
+static
+void
+cpp_read(struct tok *token, _Bool header_mode)
+{
+	struct ppsrc *src;
+	struct mdef *macro;
+
+retry:
+	src = pvec_tail(&ppstack);
+	switch (src->type) {
+	case PP_FILE:
+		next_token(src->_.file.fp, token, header_mode);
+		break;
+	case PP_MACRO:
+		macro = src->_.macro.macro;
+		if (!macro->rlist[src->_.macro.rlist_idx].tok) {
+			--ppstack.n;
+			goto retry;
+		}
+
+		*token = *macro->rlist[src->_.macro.rlist_idx].tok;
+		++src->_.macro.rlist_idx;
+		break;
+	}
+}
+
+
+static
+void
+include(void)
 {
 	struct tok token;
 
 	/* Read header name */
-	next_token(fp, &token, 1);
+	cpp_read(&token, 1);
 	if (token.type != HNAME)
 		cpp_err();
 	printf("Included: %s\n", token.data);
-	free(token.data);
 
 	/* #include directive must not have more tokens */
-	next_token(fp, &token, 0);
+	cpp_read(&token, 0);
 	if (token.type != EFILE && token.type != NLINE)
 		cpp_err();
-	free(token.data);
 }
 
 static
 struct mdef *
-define(FILE *fp)
+define(void)
 {
 	/* Replacement list */
 	struct rent *rent;
@@ -68,7 +120,7 @@ define(FILE *fp)
 
 	/* Read macro identifier */
 	token = tvec_ptr(&stack);
-	next_token(fp, token, 0);
+	cpp_read(token, 0);
 	if (token->type != IDENT)
 		cpp_err();
 
@@ -77,12 +129,12 @@ define(FILE *fp)
 
 	/* Parse arguments for function like macro */
 	token = tvec_ptr(&stack);
-	next_token(fp, token, 0);
+	cpp_read(token, 0);
 	if (IS_PUNCT(token, "(")) {
 		macro->is_flike = 1;
 		for (arg = 0;;) {
 			token = tvec_ptr(&stack);
-			next_token(fp, token, 0);
+			cpp_read(token, 0);
 			if (IS_PUNCT(token, ","))	/* Ignore all , */
 				continue;
 			if (IS_PUNCT(token, ")"))	/* Matching ) */
@@ -92,7 +144,7 @@ define(FILE *fp)
 			htab_put(&args, token->data, (void *) (1 + arg++));
 		}
 		token = tvec_ptr(&stack);
-		next_token(fp, token, 0);
+		cpp_read(token, 0);
 	}
 
 	/* Construct replacement list */
@@ -110,13 +162,12 @@ define(FILE *fp)
 		}
 
 		token = tvec_ptr(&stack);
-		next_token(fp, token, 0);
+		cpp_read(token, 0);
 	}
 
 	/* Create arrays from vectors */
 	macro->rlist = rvec_arr(&rlist);
 	macro->stack = tvec_arr(&stack);
-
 
 	/* Free internally used hash-table */
 	free(args.arr);
@@ -128,26 +179,19 @@ static
 void
 free_macro(struct mdef *macro)
 {
-	struct tok *token;
-
-	/* Free tokens */
-	for (token = macro->stack; token->data; ++token)
-		free(token->data);
-
-	/* Free arrays */
 	free(macro->rlist);
 	free(macro->stack);
 }
 
 static
 void
-directive(FILE *fp, struct htab *macros)
+directive(struct htab *macros)
 {
 	struct tok token;
 	struct mdef *macro;
 
 	/* Empty directives are just ignored */
-	next_token(fp, &token, 0);
+	cpp_read(&token, 0);
 	if (token.type == EFILE || token.type == NLINE)
 		return;
 
@@ -157,37 +201,36 @@ directive(FILE *fp, struct htab *macros)
 
 	/* Process directive */
 	if (!strcmp(token.data, "include")) {
-		include(fp);
+		include();
 	} else if (!strcmp(token.data, "define")) {
-		macro = define(fp);
+		macro = define();
 		htab_put(macros, macro->ident, (void *) macro);
 	} else {
 		cpp_err();
 	}
-
-	free(token.data);
 }
 
 void
 preprocess(FILE *fp)
 {
-	struct pvec ppstack;	/* Token sources */
 	struct htab macros;	/* Macro table */
 	_Bool allow_dir;	/* Allow directives */
 	struct tok token;	/* Current token */
-	size_t i;
+	struct mdef *macro;	/* Current macro */
 
+	/* Create pre-processor stack and push source file */
 	pvec_init(&ppstack);
-	htab_init(&macros);
+	cpp_pushfile(fp);
 
+	/* Initialize macro table */
+	htab_init(&macros);
 	/* Allow pre-processing directives from the start */
 	allow_dir = 1;
 
 	for (;;) {
-		next_token(fp, &token, 0);
+		cpp_read(&token, 0);
 		switch (token.type) {
 		case EFILE:
-			free(token.data);
 			goto end;
 		case NLINE:
 			allow_dir = 1;
@@ -195,7 +238,13 @@ preprocess(FILE *fp)
 		case PUNCT:
 			/* Found a pre-processing directive */
 			if (allow_dir && !strcmp(token.data, "#")) {
-				directive(fp, &macros);
+				directive(&macros);
+				break;
+			}
+		case IDENT:
+			macro = (void *) htab_get(&macros, token.data);
+			if (macro) {
+				cpp_pushmacro(macro);
 				break;
 			}
 		default:
@@ -204,15 +253,14 @@ preprocess(FILE *fp)
 			allow_dir = 0;
 			break;
 		}
-		free(token.data);
 	}
 
 end:
-	free(ppstack.arr);
-	for (i = 0; i < macros.size; ++i)
+	for (size_t i = 0; i < macros.size; ++i)
 		if (macros.arr[i].key) {
 			free_macro((void *) macros.arr[i].val);
 			free((void *) macros.arr[i].val);
 		}
 	free(macros.arr);
+	free(ppstack.arr);
 }

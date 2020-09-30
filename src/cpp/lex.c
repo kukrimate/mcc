@@ -7,6 +7,7 @@
 #include <string.h>
 #include <vec.h>
 #include "io.h"
+#include "str.h"
 #include "lex.h"
 
 VEC_DEF(char, c)
@@ -384,11 +385,31 @@ punctuator(FILE *fp, struct cvec *v, int ch)
 	tmp = !tmp; /* Make gcc shut up */
 }
 
+/*
+ * FIXME: refactor to not be global
+ */
+static struct cvec v;
+
+__attribute__((constructor))
+static
+void
+lex_init(void)
+{
+	cvec_init(&v);
+}
+
+__attribute__((destructor))
+static
+void
+lex_deinit(void)
+{
+	free(v.arr);
+}
+
 void
 next_token(FILE *fp, struct tok *tok, _Bool header_mode)
 {
 	int ch;
-	struct cvec v;
 
 	/* Skip comments and whitespaces */
 	for (;;)
@@ -417,9 +438,6 @@ next_token(FILE *fp, struct tok *tok, _Bool header_mode)
 			goto endloop;
 		}
 endloop:
-
-	/* Initialize vector to store tokens */
-	cvec_init(&v);
 
 	/* If header mode is enable it overrides everything */
 	if (header_mode && (ch == '<' || ch == '"')) {
@@ -494,5 +512,6 @@ endloop:
 	}
 
 end:
-	tok->data = cvec_arr(&v);
+	tok->data = str_getptr(cvec_arr(&v));
+	v.n = 0;
 }

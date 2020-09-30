@@ -1,6 +1,6 @@
 #define A(x, y, z) (x + y + z)
-#define B()
-#define C
+#define B() C
+#define C B
 #define D 55 * ident + (test)
 
-A(1,2,5)
+C

@@ -26,7 +26,8 @@ struct mdef {
 /* Token source type */
 enum pptype {
 	PP_FILE,
-	PP_MACRO
+	PP_MACRO,
+	PP_ARRAY
 };
 
 /* Token source */
@@ -39,7 +40,13 @@ struct ppsrc {
 		struct {
 			struct mdef *macro;
 			size_t rlist_idx;
+			/* Arguments passed to this macro */
+			struct tok **args;
 		} macro;
+		struct {
+			struct tok *tokens;
+			size_t tok_idx;
+		} array;
 	} _;
 };
 

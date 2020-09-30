@@ -3,8 +3,4 @@
 #define C
 #define D 55 * ident + (test)
 
-#define X Y
-#define Y Z
-#define Z X
-
-B
+A(1,5,2)

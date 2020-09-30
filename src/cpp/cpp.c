@@ -11,6 +11,8 @@
 #include "lex.h"
 #include "cpp.h"
 
+VEC_DEF(struct tok, t)
+VEC_DEF(struct tok*, tt)
 VEC_DEF(struct rent, r)
 VEC_DEF(struct ppsrc, p)
 
@@ -38,7 +40,7 @@ cpp_pushfile(FILE *fp)
 
 static
 void
-cpp_pushmacro(struct mdef *macro)
+cpp_pushmacro(struct mdef *macro, struct tok **args)
 {
 	struct ppsrc *macrosrc;
 
@@ -47,6 +49,19 @@ cpp_pushmacro(struct mdef *macro)
 	macrosrc->type = PP_MACRO;
 	macrosrc->_.macro.macro = macro;
 	macrosrc->_.macro.rlist_idx = 0;
+	macrosrc->_.macro.args = args;
+}
+
+static
+void
+cpp_pusharray(struct tok *tokens)
+{
+	struct ppsrc *arraysrc;
+
+	arraysrc = pvec_ptr(&ppstack);
+	arraysrc->type = PP_ARRAY;
+	arraysrc->_.array.tokens = tokens;
+	arraysrc->_.array.tok_idx = 0;
 }
 
 static
@@ -70,8 +85,24 @@ retry:
 			goto retry;
 		}
 
+		if (macro->rlist[src->_.macro.rlist_idx].is_arg) {
+			cpp_pusharray(src->_.macro.args[
+				macro->rlist[src->_.macro.rlist_idx].arg]);
+			++src->_.macro.rlist_idx;
+			goto retry;
+		}
+
 		*token = macro->rlist[src->_.macro.rlist_idx].tok;
 		++src->_.macro.rlist_idx;
+		break;
+	case PP_ARRAY:
+		if (!src->_.array.tokens[src->_.array.tok_idx].data) {
+			--ppstack.n;
+			goto retry;
+		}
+
+		*token = src->_.array.tokens[src->_.array.tok_idx];
+		++src->_.array.tok_idx;
 		break;
 	}
 }
@@ -87,7 +118,7 @@ include(void)
 	cpp_read(&token, 1);
 	if (token.type != HNAME)
 		cpp_err();
-	printf("Included: %s\n", token.data);
+	printf("#include %s\n", token.data);
 
 	/* #include directive must not have more tokens */
 	cpp_read(&token, 0);
@@ -128,7 +159,7 @@ define(void)
 
 	/* Parse arguments for function like macro */
 	cpp_read(&token, 0);
-	if (IS_PUNCT(&token, "(")) {
+	if (IS_PUNCT(&token, "(") && !token.lwhite) {
 		macro->is_flike = 1;
 		for (arg = 0;;) {
 			cpp_read(&token, 0);
@@ -203,13 +234,47 @@ directive(struct htab *macros)
 	}
 }
 
+static
+void
+macro_args(struct tok ***args)
+{
+	struct ttvec argl;
+	struct tvec arg;
+	struct tok token;
+
+	cpp_read(&token, 0);
+	if (!IS_PUNCT(&token, "("))
+		cpp_err();
+
+	ttvec_init(&argl);
+	tvec_init(&arg);
+	for (;;) {
+		cpp_read(&token, 0);
+		if (token.type == NLINE || token.type == EFILE)
+			cpp_err();
+		if (IS_PUNCT(&token, ")"))
+			break;
+		if (IS_PUNCT(&token, ",")) {
+			ttvec_add(&argl, tvec_arr(&arg));
+			tvec_init(&arg);
+			continue;
+		}
+		tvec_add(&arg, token);
+	}
+	ttvec_add(&argl, tvec_arr(&arg));
+
+	*args = ttvec_arr(&argl);
+}
+
 void
 preprocess(FILE *fp)
 {
 	struct htab macros;	/* Macro table */
 	_Bool allow_dir;	/* Allow directives */
 	struct tok token;	/* Current token */
+
 	struct mdef *macro;	/* Current macro */
+	struct tok **args;
 
 	/* Create pre-processor stack and push source file */
 	pvec_init(&ppstack);
@@ -227,6 +292,7 @@ preprocess(FILE *fp)
 			goto end;
 		case NLINE:
 			allow_dir = 1;
+			printf("\n");
 			break;
 		case PUNCT:
 			/* Found a pre-processing directive */
@@ -237,12 +303,16 @@ preprocess(FILE *fp)
 		case IDENT:
 			macro = (void *) htab_get(&macros, token.data);
 			if (macro && !macro->is_blue) {
-				cpp_pushmacro(macro);
+				if (macro->is_flike)
+					macro_args(&args);
+				cpp_pushmacro(macro, args);
 				break;
 			}
 		default:
 			/* Normal pre-processing token */
-			printf("%s\n", token.data);
+			for (size_t i = 0; i < token.lwhite; ++i)
+				printf(" ");
+			printf("%s", token.data);
 			allow_dir = 0;
 			break;
 		}

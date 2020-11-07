@@ -36,8 +36,8 @@ struct tok {
 	char *data;
 };
 
-/* Is this token the specified punctuator */
 #define IS_PUNCT(tok, str) ((tok)->type == PUNCT && !strcmp((tok)->data, str))
+#define IS_IDENT(tok, str) ((tok)->type == IDENT && !strcmp((tok)->data, str))
 
 /*
  * Get the next pre-processing token

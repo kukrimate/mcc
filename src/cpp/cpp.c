@@ -207,6 +207,38 @@ free_macro(struct mdef *macro)
 	free(macro->rlist);
 }
 
+/* Skip a nested conditional block */
+static
+void
+skip_nested(void)
+{
+	size_t lvl;	/* How deeply nested are we? */
+	_Bool allow_dir;/* Allow pre-processing directives? */
+	struct tok token;
+
+	for (lvl = 0, allow_dir = 0;;) {
+		cpp_read(&token, 0);
+		if (IS_IDENT(&token, "endif")) {
+			break;
+		} else if (allow_dir && IS_PUNCT(&token, "#")) {
+			cpp_read(&token, 0);
+			if (IS_IDENT(&token, "if") ||
+					IS_IDENT(&token, "ifdef") ||
+					IS_IDENT(&token, "ifndef")) {
+				++lvl;
+			} else if (IS_IDENT(&token, "endif") ||
+					IS_IDENT(&token, "else") ||
+					IS_IDENT(&token, "elif")) {
+				if (!lvl--)
+					return;
+			}
+			allow_dir = 0;
+		} else if (token.type == NLINE) {
+			allow_dir = 1;
+		}
+	}
+}
+
 static
 void
 directive(struct htab *macros)
@@ -229,6 +261,16 @@ directive(struct htab *macros)
 	} else if (!strcmp(token.data, "define")) {
 		macro = define();
 		htab_put(macros, macro->ident, (void *) macro);
+	} else if (!strcmp(token.data, "if") ||
+			!strcmp(token.data, "ifdef") ||
+			!strcmp(token.data, "ifndef")) {
+		/* Read till NLINE */
+		do {
+			cpp_read(&token, 0);
+		} while (token.type != NLINE);
+
+		/* Skip conditional */
+		skip_nested();
 	} else {
 		cpp_err();
 	}
@@ -264,6 +306,63 @@ macro_args(struct tok ***args)
 	ttvec_add(&argl, tvec_arr(&arg));
 
 	*args = ttvec_arr(&argl);
+}
+
+/* Print a string or character literal escaped
+ * NOTE: this is crap code but only used for debugging */
+static
+void
+print_lit(char *data)
+{
+	char *p, *end;
+
+	if (*data == 'L') {
+		printf("L");
+		++data;
+	}
+
+	printf("%c", data[0]);
+	end = data + strlen(data) - 1;
+	for (p = data + 1; p < end; ++p) {
+		switch (*p) {
+		case '\\':
+			printf("\\\\");
+			break;
+		case '\?':
+			printf("\\\?");
+			break;
+		case '\'':
+			printf("\\\'");
+			break;
+		case '\"':
+			printf("\\\"");
+			break;
+		case '\n':
+			printf("\\n");
+			break;
+		case '\r':
+			printf("\\r");
+			break;
+		case '\t':
+			printf("\\t");
+			break;
+		case '\v':
+			printf("\\v");
+			break;
+		case '\f':
+			printf("\\f");
+			break;
+		case '\a':
+			printf("\\a");
+			break;
+		case '\b':
+			printf("\\a");
+			break;
+		default:
+			printf("%c", *p);
+		}
+	}
+	printf("%c", data[0]);
 }
 
 void
@@ -312,7 +411,10 @@ preprocess(FILE *fp)
 			/* Normal pre-processing token */
 			for (size_t i = 0; i < token.lwhite; ++i)
 				printf(" ");
-			printf("%s", token.data);
+			if (token.type == CHARC || token.type == STLIT)
+				print_lit(token.data);
+			else
+				printf("%s", token.data);
 			allow_dir = 0;
 			break;
 		}

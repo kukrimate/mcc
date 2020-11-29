@@ -1,0 +1,3 @@
+[submodule "libkm"]
+	path = libkm
+	url = ./libkm

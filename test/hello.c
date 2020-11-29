@@ -3,5 +3,9 @@
 int
 main(void)
 {
-	printf(L"Hello World! %c\n", L' ');
+	int my_int;
+
+	my_int = 5;
+	*(short *) &my_int = 4;
+	printf("my_int: %d\n", my_int);
 }

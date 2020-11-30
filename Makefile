@@ -1,5 +1,4 @@
-# Turn on all warnings and disable insane ones explicitly
-CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -Wno-implicit-fallthrough -g
+CFLAGS := -Ilibkm -std=c99 -Wall -g
 
 MCC := mcc
 OBJ := src/lex.o src/cpp.o

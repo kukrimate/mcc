@@ -71,10 +71,10 @@ typedef struct {
     /* Type of the token */
 	token_type type;
     /* Original string (for identifiers/constants) */
-    const char *str;
+    const char *data;
 } token;
 
-int
+void
 next_token(FILE *fp, token *token);
 
 #endif

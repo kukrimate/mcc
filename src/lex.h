@@ -58,11 +58,11 @@ typedef enum {
     TK_ADD_EQUAL    = 0x126, /* +=  */
     TK_SUB_EQUAL    = 0x127, /* -=  */
     TK_LSHIFT_EQUAL = 0x128, /* <<= */
-    TK_RSHIFT_EQAUL = 0x129, /* >>= */
+    TK_RSHIFT_EQUAL = 0x129, /* >>= */
     TK_AND_EQUAL    = 0x12a, /* &=  */
     TK_XOR_EQUAL    = 0x12b, /* ^=  */
     TK_OR_EQUAL     = 0x12c, /* |=  */
-    TL_COMMA        = 0x12d, /* ,   */
+    TK_COMMA        = 0x12d, /* ,   */
     TK_HASH         = 0x12e, /* #   */
     TK_HASH_HASH    = 0x12f, /* ##  */
 } token_type;
@@ -74,7 +74,12 @@ typedef struct {
     const char *data;
 } token;
 
+/* Get the next token from a char stream */
 void
 next_token(FILE *fp, token *token);
+
+/* Get the next token in header name mode */
+void
+next_header_name(FILE *fp, token *token);
 
 #endif

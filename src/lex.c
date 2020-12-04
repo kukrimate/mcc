@@ -20,7 +20,7 @@ lex_err(void)
 static void
 identifier(int ch, FILE *fp, token *token)
 {
-    struct cvec buf;
+    cvec buf;
 
     cvec_init(&buf);
     cvec_add(&buf, ch);
@@ -44,7 +44,7 @@ identifier(int ch, FILE *fp, token *token)
 static void
 pp_num(int ch, FILE *fp, token *token)
 {
-    struct cvec buf;
+    cvec buf;
 
     cvec_init(&buf);
     cvec_add(&buf, ch);
@@ -79,7 +79,7 @@ pp_num(int ch, FILE *fp, token *token)
 }
 
 static void
-octal(FILE *fp, struct cvec *v, int ch)
+octal(FILE *fp, cvec *v, int ch)
 {
     ch -= '0';
     /* Octal constants only allow 3 digits max */
@@ -117,7 +117,7 @@ hexdigit_to_int(int ch)
 }
 
 static void
-hexadecimal(FILE *fp, struct cvec *v)
+hexadecimal(FILE *fp, cvec *v)
 {
     int ch;
 
@@ -139,7 +139,7 @@ endloop:
 }
 
 static void
-escseq(FILE *fp, struct cvec *v, int ch)
+escseq(FILE *fp, cvec *v, int ch)
 {
     switch (ch = mgetc(fp)) {
     case '\'':  /* Simple escape sequences */
@@ -184,7 +184,7 @@ escseq(FILE *fp, struct cvec *v, int ch)
 static void
 character(int ch, FILE *fp, token *token)
 {
-    struct cvec buf;
+    cvec buf;
 
     cvec_init(&buf);
 
@@ -216,7 +216,7 @@ character(int ch, FILE *fp, token *token)
 static void
 string(int ch, FILE *fp, token *token)
 {
-    struct cvec buf;
+    cvec buf;
 
     cvec_init(&buf);
 
@@ -249,7 +249,7 @@ static void
 header_name(int endch, FILE *fp, token *token)
 {
     int ch;
-    struct cvec buf;
+    cvec buf;
 
     cvec_init(&buf);
 

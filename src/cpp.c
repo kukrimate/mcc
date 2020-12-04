@@ -13,13 +13,13 @@
 //// TYPES start
 
 // Vector of tokens
-VEC_GEN(token, t)
+VEC_GEN(token, token_)
 
 // Vector of token lists
-VEC_GEN(token *, tt)
+VEC_GEN(token_vec, token_vec_)
 
 // Identifier to index map, for finding arguments
-MAP_GEN(const char *, size_t, djb2_hash, !strcmp, i)
+MAP_GEN(const char *, size_t, djb2_hash, !strcmp, index_)
 
 typedef enum {
     R_TOK, // Replace with a token
@@ -35,21 +35,21 @@ typedef struct {
 } replace;
 
 // Vector for creating the replacement list
-VEC_GEN(replace, r)
+VEC_GEN(replace, replace_)
 
 typedef struct {
     // Is this macro currently callable?
-    _Bool   painted_blue;
+    _Bool       painted_blue;
     // Is this a function like macro?
-    _Bool   function_like;
+    _Bool       function_like;
     // Number of arguments (if function like)
-    size_t  num_args;
-    // Replacement list for each argument
-    replace *replacement_list;
+    size_t      num_args;
+    // Replacement list
+    replace_vec replacement_list;
 } macro;
 
 // Hash map for storing macros
-MAP_GEN(const char *, macro *, djb2_hash, !strcmp, m)
+MAP_GEN(const char *, macro *, djb2_hash, !strcmp, macro_)
 
 typedef enum {
     F_FILE,  // Directly from the lexer
@@ -61,22 +61,31 @@ typedef struct {
     frame_type type;
     union {
         // F_FILE
-        FILE *file;
+        struct {
+            // File handle
+            FILE          *fp;
+        };
         // F_MACRO
         struct {
-            macro *macro;
-            token **macro_arguments;
+            // Macro definition
+            macro         *macro;
+            // Current position in replacement list
+            size_t        replace_idx;
+            // Arguments provided on macro call
+            token_vec_vec arguments;
         };
         // F_LIST
         struct {
-            size_t num_tokens;
-            token  *token_list;
+            // Token list
+            token_vec     tokens;
+            // Current position in token list
+            size_t        token_idx;
         };
     };
 } frame;
 
 // Vector of frames (as the preprocessor "stack")
-VEC_GEN(frame, f);
+VEC_GEN(frame, frame_);
 
 //// TYPES end
 
@@ -113,53 +122,135 @@ output_token(token *token)
 }
 
 static void
-frame_next_token(struct fvec *frame_stack, token *token)
+frame_push_file(frame_vec *frame_stack, FILE *fp)
 {
+    frame *frame;
 
+    frame = frame_vec_push(frame_stack);
+    frame->type = F_FILE;
+    frame->fp   = fp;
 }
 
 static void
-dir_define(struct fvec *frame_stack, struct mmap *macro_database)
+frame_push_macro(frame_vec *frame_stack, macro *macro, token_vec_vec arguments)
 {
-    struct imap arg_to_idx;
-    struct rvec replacement_list;
+    frame *frame;
+
+    frame = frame_vec_push(frame_stack);
+    frame->type        = F_MACRO;
+    frame->macro       = macro;
+    frame->replace_idx = 0;
+    frame->arguments   = arguments;
+}
+
+static void
+frame_push_list(frame_vec *frame_stack, token_vec tokens)
+{
+    frame *frame;
+
+    frame = frame_vec_push(frame_stack);
+    frame->type      = F_LIST;
+    frame->tokens    = tokens;
+    frame->token_idx = 0;
+}
+
+static void
+frame_next_token(frame_vec *frame_stack, token *token)
+{
+    frame *frame;
+
+recurse:
+    frame = frame_stack->arr + frame_stack->n - 1;
+    switch (frame->type) {
+    case F_FILE:
+        // Read token directly from lexer
+        lex_next_token(frame->fp, token);
+        // Remove frame on end of file
+        if (token->type == TK_END_FILE)
+            --frame_stack->n;
+        break;
+    case F_MACRO:;
+        // Remove frame on the end of the replacement list
+        if (frame->replace_idx == frame->macro->replacement_list.n) {
+            // Remove blue pain from macro
+            frame->macro->painted_blue = 0;
+            --frame_stack->n;
+            // Recurse to get token from the frame under the macro
+            goto recurse;
+        }
+
+        // Get the next element of the macro's replacement list
+        replace r = frame->macro->replacement_list.arr[frame->replace_idx++];
+
+        switch (r.type) {
+        case R_TOK:
+            // Get token from replacement list
+            *token = r.token;
+            break;
+        case R_ARG:
+            // Push argument list for required parameter
+            frame_push_list(frame_stack, frame->arguments.arr[r.index]);
+            // Recurse to get token from the new frame
+            goto recurse;
+        }
+
+        break;
+    case F_LIST:
+        // Remove frame on the end of the token list
+        if (frame->token_idx == frame->tokens.n) {
+            --frame_stack->n;
+            // Recurse to get token from the frame under the macro
+            goto recurse;
+        }
+
+        // Get token from the token list
+        *token = frame->tokens.arr[frame->token_idx++];
+        break;
+    }
+}
+
+static void
+dir_define(frame_vec *frame_stack, macro_map *macro_database)
+{
     macro *macro;
     token identifier, tmp;
-
-    // Initialize data structures
-    imap_init(&arg_to_idx);
-    rvec_init(&replacement_list);
+    index_map arg_to_idx;
 
     // Initialize macro struct
     macro = malloc(sizeof(*macro));
     if (!macro)
         abort();
+
     macro->painted_blue = 0;
+    replace_vec_init(&macro->replacement_list);
 
     // Macro name must be an identifier
     frame_next_token(frame_stack, &identifier);
     if (identifier.type != TK_IDENTIFIER)
         cpp_err();
 
-    // Check if this macro is function like
     frame_next_token(frame_stack, &tmp);
-    if (tmp.type == TK_LEFT_PAREN) { // Function like
+    if (tmp.type == TK_LEFT_PAREN) {
+        // Function like macro
         macro->function_like = 1;
         macro->num_args      = 0;
+
+        // Need index map to parse function like replacement list
+        index_map_init(&arg_to_idx);
 
         // Capture argument names
         // NOTE: argument indexes start at 1 as libkm maps use 0
         // as the not-present marker
         for (size_t idx = 1;; ++idx) {
-            lex_next_token(fp, &tmp);
+            frame_next_token(frame_stack, &tmp);
             switch (tmp.type) {
             case TK_IDENTIFIER:
                 // Save index for argument name
-                imap_put(&arg_to_idx, tmp.data, idx);
+                index_map_put(&arg_to_idx, tmp.data, idx);
                 // Increase argument count
                 ++macro->num_args;
                 // Argument name followed either by a , or )
-                lex_next_token(fp, &tmp);
+                frame_next_token(frame_stack, &tmp);
                 if (tmp.type == TK_RIGHT_PAREN)
                     goto break_loop;
                 else if (tmp.type != TK_COMMA)
@@ -175,16 +266,18 @@ dir_define(struct fvec *frame_stack, struct mmap *macro_database)
 
         // Capture replacement list
         for (;;) {
-            lex_next_token(fp, &tmp);
+            frame_next_token(frame_stack, &tmp);
             switch (tmp.type) {
-            case TK_END_FILE: // End line or end file means end of macro
+            case TK_END_FILE:
             case TK_END_LINE:
-                goto done;
-            default:;         // Append token or argument index to replacement list
-                replace *r = rvec_push(&replacement_list);
+                 // End line or end file means end of macro
+                goto break_loop2;
+            default:;
+                // Append token or argument index to replacement list
+                replace *r = replace_vec_push(&macro->replacement_list);
                 size_t arg_idx;
                 if (tmp.type == TK_IDENTIFIER &&
-                        (arg_idx = imap_get(&arg_to_idx, tmp.data))) {
+                        (arg_idx = index_map_get(&arg_to_idx, tmp.data))) {
                     r->type  = R_ARG;
                     r->index = arg_idx - 1;
                 } else {
@@ -193,92 +286,108 @@ dir_define(struct fvec *frame_stack, struct mmap *macro_database)
                 }
             }
         }
-    } else {                         // Normal
+        break_loop2:
+
+        // Free index map
+        index_map_free(&arg_to_idx);
+    } else {
+        // Normal macro
         macro->function_like = 0;
 
-        for (;; lex_next_token(fp, &tmp)) {
+        for (;; frame_next_token(frame_stack, &tmp)) {
             switch (tmp.type) {
-            case TK_END_FILE: // End line or end file means end of macro
+            case TK_END_FILE:
             case TK_END_LINE:
-                goto done;
-            default:;         // Append token to replacement list
-                replace *r = rvec_push(&replacement_list);
+                // End line or end file means end of macro
+                goto break_loop3;
+            default:;
+                // Append token to replacement list
+                replace *r = replace_vec_push(&macro->replacement_list);
                 r->type  = R_TOK;
                 r->token = tmp;
                 break;
             }
         }
+        break_loop3:;
     }
 
-done:
-    // Free argument index map
-    imap_free(&arg_to_idx);
-    // Copy replacement list pointer to macro struct
-    macro->replacement_list = replacement_list.arr;
     // Add macro to the macro database
-    mmap_put(macro_database, identifier.data, macro);
+    macro_map_put(macro_database, identifier.data, macro);
 }
 
 static void
-expand_macro(FILE *fp, macro *macro)
+expand_macro(frame_vec *frame_stack, macro *macro)
 {
-    struct ttvec arguments;
-    struct tvec cur_arg;
-    token tmp;
+    token_vec     cur_arg;
+    token_vec_vec arguments;
+    token         tmp;
 
     // Capture arguments if the macro is function like
     if (macro->function_like) {
         // Initialize data structures
-        ttvec_init(&arguments);
-        tvec_init(&cur_arg);
+        token_vec_init(&cur_arg);
+        token_vec_vec_init(&arguments);
 
         // Argument list needs to start with (
-        lex_next_token(fp, &tmp);
+        frame_next_token(frame_stack, &tmp);
         if (tmp.type != TK_LEFT_PAREN)
             cpp_err();
 
         for (;;) {
-            lex_next_token(fp, &tmp);
+            frame_next_token(frame_stack, &tmp);
             switch (tmp.type) {
             case TK_END_FILE:    // Unexpected end of arguments
             case TK_END_LINE:
                 cpp_err();
                 break;
             case TK_COMMA:       // End of current argument
-                ttvec_add(&arguments, cur_arg.arr);
-                tvec_init(&cur_arg);
+                token_vec_vec_add(&arguments, cur_arg);
+                token_vec_init(&cur_arg);
                 break;
             case TK_RIGHT_PAREN: // End of final argument
-                ttvec_add(&arguments, cur_arg.arr);
+                // Avoid adding empty argument to 0 arg macro
+                if (macro->num_args || cur_arg.n)
+                    token_vec_vec_add(&arguments, cur_arg);
                 goto endloop;
             default:             // Add token to argument
-                output_token(&tmp);
-                tvec_add(&cur_arg, tmp);
+                token_vec_add(&cur_arg, tmp);
                 break;
             }
         }
-        endloop:
+        endloop:;
 
-        // Add argument list to macro frame
+        // Make sure the macro has the correct number of arguments
+        if (macro->num_args != arguments.n)
+            cpp_err();
     }
+
+    // Paint macro blue
+    macro->painted_blue = 1;
+
+    // Push macro frame
+    frame_push_macro(frame_stack, macro, arguments);
 }
 
 static void
 preprocess(FILE *fp)
 {
-    struct mmap macro_database;
+    frame_vec frame_stack;
+    macro_map macro_database;
+    _Bool     recognize_directive;
+    token     token;
 
-    token token;
-    _Bool recognize_directive;
+    // Initialize frame stack
+    frame_vec_init(&frame_stack);
+    frame_push_file(&frame_stack, fp);
 
     // Initialize macro database
-    mmap_init(&macro_database);
+    macro_map_init(&macro_database);
 
     // Enable directive recognition at the start
     recognize_directive = 1;
 
     for (;;) {
-        lex_next_token(fp, &token);
+        frame_next_token(&frame_stack, &token);
         switch (token.type) {
         case TK_END_FILE:
             // Exit loop on end of file
@@ -290,29 +399,25 @@ preprocess(FILE *fp)
         case TK_HASH:
             // Check if we need to recognize a directive
             if (recognize_directive) {
-                lex_next_token(fp, &token);
-
+                frame_next_token(&frame_stack, &token);
                 // Directive name must be an identifier
                 if (token.type != TK_IDENTIFIER)
                     cpp_err();
-
                 // Check for all supported directives
                 if (!strcmp(token.data, "define")) // #define
-                    dir_define(fp, &macro_database);
+                    dir_define(&frame_stack, &macro_database);
                 else
                     cpp_err();
-
                 // Swallow hash token
                 continue;
             }
             break;
         case TK_IDENTIFIER:;
             // Check if the identifier is an active macro
-            macro *macro = mmap_get(&macro_database, token.data);
+            macro *macro = macro_map_get(&macro_database, token.data);
             if (macro && !macro->painted_blue) {
                 // Perform macro expension
-                expand_macro(fp, macro);
-
+                expand_macro(&frame_stack, macro);
                 // Swallow identifier
                 continue;
             }

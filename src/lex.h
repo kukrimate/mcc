@@ -78,4 +78,7 @@ typedef struct {
 void
 lex_next_token(FILE *fp, token *token);
 
+// Punctuator to string table
+extern const char *punctuator_str[];
+
 #endif

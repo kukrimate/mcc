@@ -12,6 +12,12 @@
 
 //// TYPES start
 
+// Vector of tokens
+VEC_GEN(token, t)
+
+// Vector of token lists
+VEC_GEN(token *, tt)
+
 // Identifier to index map, for finding arguments
 MAP_GEN(const char *, size_t, djb2_hash, !strcmp, i)
 
@@ -45,6 +51,33 @@ typedef struct {
 // Hash map for storing macros
 MAP_GEN(const char *, macro *, djb2_hash, !strcmp, m)
 
+typedef enum {
+    F_FILE,  // Directly from the lexer
+    F_MACRO, // Replacement list of a macro
+    F_LIST,  // List of tokens in memory
+} frame_type;
+
+typedef struct {
+    frame_type type;
+    union {
+        // F_FILE
+        FILE *file;
+        // F_MACRO
+        struct {
+            macro *macro;
+            token **macro_arguments;
+        };
+        // F_LIST
+        struct {
+            size_t num_tokens;
+            token  *token_list;
+        };
+    };
+} frame;
+
+// Vector of frames (as the preprocessor "stack")
+VEC_GEN(frame, f);
+
 //// TYPES end
 
 //// CODE start
@@ -56,8 +89,37 @@ cpp_err(void)
     exit(1);
 }
 
+
 static void
-dir_define(FILE *fp, struct mmap *macro_database)
+output_token(token *token)
+{
+    switch (token->type) {
+    case TK_END_LINE:
+        putchar('\n');
+        break;
+    case TK_IDENTIFIER:
+    case TK_PP_NUMBER:
+        printf("%s", token->data);
+        break;
+    case TK_CHAR_CONST:
+        printf("\'%s\'", token->data);
+        break;
+    case TK_STRING_LIT:
+        printf("\"%s\"", token->data);
+        break;
+    default:
+        printf("%s", punctuator_str[token->type]);
+    }
+}
+
+static void
+frame_next_token(struct fvec *frame_stack, token *token)
+{
+
+}
+
+static void
+dir_define(struct fvec *frame_stack, struct mmap *macro_database)
 {
     struct imap arg_to_idx;
     struct rvec replacement_list;
@@ -69,18 +131,18 @@ dir_define(FILE *fp, struct mmap *macro_database)
     rvec_init(&replacement_list);
 
     // Initialize macro struct
-    macro = malloc(sizeof(macro));
+    macro = malloc(sizeof(*macro));
     if (!macro)
         abort();
     macro->painted_blue = 0;
 
     // Macro name must be an identifier
-    lex_next_token(fp, &identifier);
+    frame_next_token(frame_stack, &identifier);
     if (identifier.type != TK_IDENTIFIER)
         cpp_err();
 
     // Check if this macro is function like
-    lex_next_token(fp, &tmp);
+    frame_next_token(frame_stack, &tmp);
     if (tmp.type == TK_LEFT_PAREN) { // Function like
         macro->function_like = 1;
         macro->num_args      = 0;
@@ -99,19 +161,19 @@ dir_define(FILE *fp, struct mmap *macro_database)
                 // Argument name followed either by a , or )
                 lex_next_token(fp, &tmp);
                 if (tmp.type == TK_RIGHT_PAREN)
-                    goto capture_replace;
+                    goto break_loop;
                 else if (tmp.type != TK_COMMA)
                     cpp_err();
                 break;
             case TK_RIGHT_PAREN: // End of argument names
-                goto capture_replace;
+                goto break_loop;
             default:             // No other tokens are valid here
                 cpp_err();
             }
         }
+        break_loop:
 
         // Capture replacement list
-        capture_replace:
         for (;;) {
             lex_next_token(fp, &tmp);
             switch (tmp.type) {
@@ -158,6 +220,50 @@ done:
 }
 
 static void
+expand_macro(FILE *fp, macro *macro)
+{
+    struct ttvec arguments;
+    struct tvec cur_arg;
+    token tmp;
+
+    // Capture arguments if the macro is function like
+    if (macro->function_like) {
+        // Initialize data structures
+        ttvec_init(&arguments);
+        tvec_init(&cur_arg);
+
+        // Argument list needs to start with (
+        lex_next_token(fp, &tmp);
+        if (tmp.type != TK_LEFT_PAREN)
+            cpp_err();
+
+        for (;;) {
+            lex_next_token(fp, &tmp);
+            switch (tmp.type) {
+            case TK_END_FILE:    // Unexpected end of arguments
+            case TK_END_LINE:
+                cpp_err();
+                break;
+            case TK_COMMA:       // End of current argument
+                ttvec_add(&arguments, cur_arg.arr);
+                tvec_init(&cur_arg);
+                break;
+            case TK_RIGHT_PAREN: // End of final argument
+                ttvec_add(&arguments, cur_arg.arr);
+                goto endloop;
+            default:             // Add token to argument
+                output_token(&tmp);
+                tvec_add(&cur_arg, tmp);
+                break;
+            }
+        }
+        endloop:
+
+        // Add argument list to macro frame
+    }
+}
+
+static void
 preprocess(FILE *fp)
 {
     struct mmap macro_database;
@@ -168,18 +274,21 @@ preprocess(FILE *fp)
     // Initialize macro database
     mmap_init(&macro_database);
 
-    // Directives are only recognizes after newlines (and at the start)
+    // Enable directive recognition at the start
     recognize_directive = 1;
 
     for (;;) {
         lex_next_token(fp, &token);
         switch (token.type) {
-        case TK_END_FILE: // We're done
+        case TK_END_FILE:
+            // Exit loop on end of file
             return;
-        case TK_END_LINE: // Newline enable directive recognition
+        case TK_END_LINE:
+            // Newline enables directive recognition
             recognize_directive = 1;
             break;
-        case TK_HASH:     // Hash might signal a directive
+        case TK_HASH:
+            // Check if we need to recognize a directive
             if (recognize_directive) {
                 lex_next_token(fp, &token);
 
@@ -192,13 +301,26 @@ preprocess(FILE *fp)
                     dir_define(fp, &macro_database);
                 else
                     cpp_err();
+
+                // Swallow hash token
+                continue;
             }
             break;
-        default:          // Other tokens disable directive recognition
-            printf("%d\n", token.type);
-            recognize_directive = 0;
-            break;
+        case TK_IDENTIFIER:;
+            // Check if the identifier is an active macro
+            macro *macro = mmap_get(&macro_database, token.data);
+            if (macro && !macro->painted_blue) {
+                // Perform macro expension
+                expand_macro(fp, macro);
+
+                // Swallow identifier
+                continue;
+            }
+        default:;
         }
+
+        // We need to output the token here
+        output_token(&token);
     }
 
 }

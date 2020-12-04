@@ -229,7 +229,7 @@ string(int ch, FILE *fp, token *token)
             escseq(fp, &buf, ch);
             break;
         /* End of string */
-        case '"':
+        case '\"':
             token->type = TK_STRING_LIT;
             token->data = buf.arr;
             return;
@@ -241,8 +241,41 @@ string(int ch, FILE *fp, token *token)
     }
 }
 
+static void
+header_name(int endch, FILE *fp, token *token)
+{
+    int ch;
+    struct cvec buf;
+
+    cvec_init(&buf);
+
+    for (;;) {
+        ch = mgetc(fp);
+        switch (ch) {
+        /* Normal character */
+        default:
+            /* End of header name */
+            if (ch == endch) {
+                token->type = TK_HEADER_NAME;
+                token->data = buf.arr;
+                return;
+            }
+            cvec_add(&buf, ch);
+            break;
+        /* Escape sequence */
+        case '\\':
+            escseq(fp, &buf, ch);
+            break;
+        /* Invalid string */
+        case EOF:
+        case '\n':
+            lex_err();
+        }
+    }
+}
+
 void
-next_token(FILE *fp, token *token)
+lex_next_token(FILE *fp, token *token)
 {
     int ch;
 
@@ -278,7 +311,7 @@ next_token(FILE *fp, token *token)
         character(ch, fp, token);
         return;
     // String literal
-    case '"':
+    case '\"':
         string(ch, fp, token);
         return;
     // Punctuators
@@ -455,78 +488,6 @@ next_token(FILE *fp, token *token)
         else                                                // #
             token->type = TK_HASH;
         return;
-    default:
-        lex_err();
-    }
-}
-
-static void
-header_name(int endch, FILE *fp, token *token)
-{
-    int ch;
-    struct cvec buf;
-
-    cvec_init(&buf);
-
-    for (;;) {
-        ch = mgetc(fp);
-        switch (ch) {
-        /* Normal character */
-        default:
-            /* End of header name */
-            if (ch == endch) {
-                token->type = TK_HEADER_NAME;
-                token->data = buf.arr;
-                return;
-            }
-            cvec_add(&buf, ch);
-            break;
-        /* Escape sequence */
-        case '\\':
-            escseq(fp, &buf, ch);
-            break;
-        /* Invalid string */
-        case EOF:
-        case '\n':
-            lex_err();
-        }
-    }
-}
-
-void
-next_header_name(FILE *fp, token *token)
-{
-    int ch;
-
-    retry:
-    switch ((ch = mgetc(fp))) {
-    // Whitespace
-    case '\r':
-    case '\f':
-    case '\v':
-    case '\t':
-    case ' ':
-        goto retry;
-    case '<':
-        header_name('>', fp, token);
-        return;
-    case '"':
-        header_name('"', fp, token);
-        return;
-    case '/':
-        if (mnext(fp, '/') == '/') {                        // Line comment
-            while (mgetc(fp) != '\n');
-            goto retry;
-        } else if (mnext(fp, '*') == '*') {                 // Block comment
-            for (;;) {
-                ch = mgetc(fp);
-                if (ch == EOF)
-                    lex_err();
-                if (ch == '*' && mnext(fp, '/') == '/')
-                    goto retry;
-            }
-        }
-        /* FALLTHROUGH */
     default:
         lex_err();
     }

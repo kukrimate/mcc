@@ -4,30 +4,68 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <vec.h>
 #include "lex.h"
 
-int
-main(int argc, char *argv[])
+typedef enum {
+	FT_FILE,
+} frame_type;
+
+typedef struct {
+	frame_type type;
+	union {
+		FILE *fp;
+	};
+} frame;
+
+VEC_GEN(frame, f)
+
+static void
+next_token(struct fvec *frames, token *token)
 {
-	char *path;
-	FILE *fp;
+	frame *frame;
+
+recurse:
+	// Signal end of file if no frames are left
+	if (!frames->n) {
+		token->type = TK_END_FILE;
+		return;
+	}
+
+	// Get most current frame
+	frame = frames->arr + (frames->n - 1);
+
+	// Seperate handling for each frame type
+	switch (frame->type) {
+	case FT_FILE:
+		// Call lexer on the file
+		lex_next_token(frame->fp, token);
+		break;
+	}
+
+	// See if we need to recurse
+	if (token->type == TK_END_FILE) {
+		--frames->n;
+		goto recurse;
+	}
+}
+
+static void
+preprocess(FILE *fp)
+{
+	struct fvec frames;
 	token token;
 
-	if (argc < 2) {
-		fprintf(stderr, "Usage: %s FILE\n", argv[0]);
-		return 1;
-	}
-
-	path = argv[1];
-
-	if (!(fp = fopen(path, "r"))) {
-		perror(path);
-		return 1;
-	}
+	// Initialize stack
+	fvec_init(&frames);
+	// Push input file as a start
+	fvec_add(&frames, (frame) { .type = FT_FILE, .fp = fp });
 
 	for (;;) {
-		next_token(fp, &token);
-		if (!token.type)
+		next_token(&frames, &token);
+
+		// Exit loop on end of file
+		if (token.type == TK_END_FILE)
 			break;
 
 		switch (token.type) {
@@ -44,6 +82,27 @@ main(int argc, char *argv[])
 		}
 	}
 
+}
+
+int
+main(int argc, char *argv[])
+{
+	char *path;
+	FILE *fp;
+
+	if (argc < 2) {
+		fprintf(stderr, "Usage: %s FILE\n", argv[0]);
+		return 1;
+	}
+
+	path = argv[1];
+
+	if (!(fp = fopen(path, "r"))) {
+		perror(path);
+		return 1;
+	}
+
+	preprocess(fp);
 	fclose(fp);
 	return 0;
 }

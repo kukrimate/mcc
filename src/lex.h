@@ -76,10 +76,6 @@ typedef struct {
 
 /* Get the next token from a char stream */
 void
-next_token(FILE *fp, token *token);
-
-/* Get the next token in header name mode */
-void
-next_header_name(FILE *fp, token *token);
+lex_next_token(FILE *fp, token *token);
 
 #endif

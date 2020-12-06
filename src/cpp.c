@@ -49,7 +49,7 @@ typedef struct {
 } macro;
 
 // Hash map for storing macros
-MAP_GEN(const char *, macro *, djb2_hash, !strcmp, macro_)
+MAP_GEN(const char *, macro, djb2_hash, !strcmp, macro_)
 
 typedef enum {
     F_FILE,  // Directly from the lexer
@@ -216,18 +216,15 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
     token identifier, tmp;
     index_map arg_to_idx;
 
-    // Initialize macro struct
-    macro = malloc(sizeof(*macro));
-    if (!macro)
-        abort();
-
-    macro->painted_blue = 0;
-    replace_vec_init(&macro->replacement_list);
-
     // Macro name must be an identifier
     frame_next_token(frame_stack, &identifier);
     if (identifier.type != TK_IDENTIFIER)
         cpp_err();
+
+    // Put macro name into database and get pointer to struct
+    macro = macro_map_putptr(macro_database, identifier.data);
+    macro->painted_blue = 0;
+    replace_vec_init(&macro->replacement_list);
 
     frame_next_token(frame_stack, &tmp);
     if (tmp.type == TK_LEFT_PAREN) {
@@ -239,9 +236,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
         index_map_init(&arg_to_idx);
 
         // Capture argument names
-        // NOTE: argument indexes start at 1 as libkm maps use 0
-        // as the not-present marker
-        for (size_t idx = 1;; ++idx) {
+        for (size_t idx = 0;; ++idx) {
             frame_next_token(frame_stack, &tmp);
             switch (tmp.type) {
             case TK_IDENTIFIER:
@@ -277,9 +272,9 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
                 replace *r = replace_vec_push(&macro->replacement_list);
                 size_t arg_idx;
                 if (tmp.type == TK_IDENTIFIER &&
-                        (arg_idx = index_map_get(&arg_to_idx, tmp.data))) {
+                        index_map_get(&arg_to_idx, tmp.data, &arg_idx)) {
                     r->type  = R_ARG;
-                    r->index = arg_idx - 1;
+                    r->index = arg_idx;
                 } else {
                     r->type = R_TOK;
                     r->token = tmp;
@@ -310,9 +305,6 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
         }
         break_loop3:;
     }
-
-    // Add macro to the macro database
-    macro_map_put(macro_database, identifier.data, macro);
 }
 
 static void
@@ -414,7 +406,7 @@ preprocess(FILE *fp)
             break;
         case TK_IDENTIFIER:;
             // Check if the identifier is an active macro
-            macro *macro = macro_map_get(&macro_database, token.data);
+            macro *macro = macro_map_getptr(&macro_database, token.data);
             if (macro && !macro->painted_blue) {
                 // Perform macro expension
                 expand_macro(&frame_stack, macro);

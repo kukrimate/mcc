@@ -155,6 +155,18 @@ frame_push_list(frame_vec *frame_stack, token_vec tokens)
 }
 
 static void
+frame_push_token(frame_vec *frame_stack, token token)
+{
+    frame *frame;
+
+    frame = frame_vec_push(frame_stack);
+    frame->type      = F_LIST;
+    token_vec_init(&frame->tokens);
+    token_vec_add(&frame->tokens, token);
+    frame->token_idx = 0;
+}
+
+static void
 frame_next_token(frame_vec *frame_stack, token *token)
 {
     frame *frame;
@@ -241,6 +253,9 @@ expand_macro(frame_vec *frame_stack, macro_map *macro_database, macro *macro)
                 cpp_err();
                 break;
             case TK_COMMA:       // End of current argument
+                // Ignore comma in nested parenthesis
+                if (paren_nest > 1)
+                    goto add_tok;
                 token_vec_vec_add(&arguments, cur_arg);
                 token_vec_init(&cur_arg);
                 break;
@@ -280,24 +295,35 @@ expand_macro(frame_vec *frame_stack, macro_map *macro_database, macro *macro)
 
 void
 next_token_expand(frame_vec *frame_stack,
-    macro_map *macro_database, token *token)
+    macro_map *macro_database, token *out)
 {
+    token tmp;
+    _Bool function_like;
+
 recurse:
+
     // Read token from frame stack
-    frame_next_token(frame_stack, token);
+    frame_next_token(frame_stack, out);
 
     // Non-identifiers can't expand
-    if (token->type != TK_IDENTIFIER || token->no_expand)
+    if (out->type != TK_IDENTIFIER || out->no_expand)
         return;
 
+    // Check if the macro is function like
+    frame_next_token(frame_stack, &tmp);
+    function_like = tmp.type == TK_LEFT_PAREN;
+    frame_push_token(frame_stack, tmp);
+
     // Check if this is macro to be expanded
-    macro *macro = macro_map_getptr(macro_database, token->data);
+    macro *macro = macro_map_getptr(macro_database, out->data);
+
     if (macro) {
         if (macro->painted_blue) {
             // Mark token for no further expansion if it did not expand because
             // of self-referential macro ISO/IEC 9899 6.10.3.4
-            token->no_expand = 1;
-        } else {
+            out->no_expand = 1;
+        } else if (function_like == macro->function_like) {
+            printf("Expanding: %s\n", out->data);
             // Perform macro expension
             expand_macro(frame_stack, macro_database, macro);
             // Swallow identifier

@@ -18,19 +18,19 @@ VEC_GEN(token, token_)
 // Vector of token lists
 VEC_GEN(token_vec, token_vec_)
 
-// Identifier to index map, for finding arguments
+// String to int map (for parameter indexes)
 MAP_GEN(const char *, size_t, djb2_hash, !strcmp, index_)
 
 typedef enum {
-    R_TOK, // Replace with a token
-    R_ARG, // Replace with an argument
+    R_TOKEN, // Replace with a token
+    R_PARAM, // Replace with a parameter
 } replace_type;
 
 typedef struct {
     replace_type type;
     union {
         token  token; // Token to append
-        size_t index; // Index of the argument
+        size_t index; // Index of the parameter
     };
 } replace;
 
@@ -42,8 +42,8 @@ typedef struct {
     _Bool       painted_blue;
     // Is this a function like macro?
     _Bool       function_like;
-    // Number of arguments (if function like)
-    size_t      num_args;
+    // Number of parameters (if function like)
+    size_t      num_params;
     // Replacement list
     replace_vec replacement_list;
 } macro;
@@ -183,11 +183,11 @@ recurse:
         replace r = frame->macro->replacement_list.arr[frame->replace_idx++];
 
         switch (r.type) {
-        case R_TOK:
+        case R_TOKEN:
             // Get token from replacement list
             *token = r.token;
             break;
-        case R_ARG:
+        case R_PARAM:
             // Push argument list for required parameter
             frame_push_list(frame_stack, frame->arguments.arr[r.index]);
             // Recurse to get token from the new frame
@@ -210,11 +210,108 @@ recurse:
 }
 
 static void
+next_token_expand(frame_vec *frame_stack,
+    macro_map *macro_database, token *token);
+
+static void
+expand_macro(frame_vec *frame_stack, macro_map *macro_database, macro *macro)
+{
+    token_vec     cur_arg;
+    token_vec_vec arguments;
+    int           paren_nest;
+    token         tmp;
+
+    // Capture arguments if the macro is function like
+    if (macro->function_like) {
+        // Initialize data structures
+        token_vec_init(&cur_arg);
+        token_vec_vec_init(&arguments);
+
+        // Argument list needs to start with (
+        next_token_expand(frame_stack, macro_database, &tmp);
+        if (tmp.type != TK_LEFT_PAREN)
+            cpp_err();
+        paren_nest = 1;
+
+        for (;;) {
+            next_token_expand(frame_stack, macro_database, &tmp);
+            switch (tmp.type) {
+            case TK_END_FILE:    // Unexpected end of arguments
+            case TK_END_LINE:
+                cpp_err();
+                break;
+            case TK_COMMA:       // End of current argument
+                token_vec_vec_add(&arguments, cur_arg);
+                token_vec_init(&cur_arg);
+                break;
+            case TK_LEFT_PAREN:
+                ++paren_nest;
+                goto add_tok;
+            case TK_RIGHT_PAREN:
+                --paren_nest;
+                if (paren_nest < 0) // Mismatched parenthesis
+                    cpp_err();
+                if (!paren_nest) {  // End of arguments
+                    // Avoid adding empty argument to 0 param macro
+                    if (macro->num_params || cur_arg.n)
+                        token_vec_vec_add(&arguments, cur_arg);
+                    goto endloop;
+                }
+                goto add_tok;
+            default:             // Add token to argument
+            add_tok:
+                token_vec_add(&cur_arg, tmp);
+                break;
+            }
+        }
+        endloop:
+
+        // Make sure the macro has the correct number of arguments
+        if (macro->num_params != arguments.n)
+            cpp_err();
+    }
+
+    // Paint macro blue
+    macro->painted_blue = 1;
+
+    // Push macro frame
+    frame_push_macro(frame_stack, macro, arguments);
+}
+
+void
+next_token_expand(frame_vec *frame_stack,
+    macro_map *macro_database, token *token)
+{
+recurse:
+    // Read token from frame stack
+    frame_next_token(frame_stack, token);
+
+    // Non-identifiers can't expand
+    if (token->type != TK_IDENTIFIER || token->no_expand)
+        return;
+
+    // Check if this is macro to be expanded
+    macro *macro = macro_map_getptr(macro_database, token->data);
+    if (macro) {
+        if (macro->painted_blue) {
+            // Mark token for no further expansion if it did not expand because
+            // of self-referential macro ISO/IEC 9899 6.10.3.4
+            token->no_expand = 1;
+        } else {
+            // Perform macro expension
+            expand_macro(frame_stack, macro_database, macro);
+            // Swallow identifier
+            goto recurse;
+        }
+    }
+}
+
+static void
 dir_define(frame_vec *frame_stack, macro_map *macro_database)
 {
     macro *macro;
     token identifier, tmp;
-    index_map arg_to_idx;
+    index_map param_to_idx;
 
     // Macro name must be an identifier
     frame_next_token(frame_stack, &identifier);
@@ -230,28 +327,28 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
     if (tmp.type == TK_LEFT_PAREN) {
         // Function like macro
         macro->function_like = 1;
-        macro->num_args      = 0;
+        macro->num_params    = 0;
 
         // Need index map to parse function like replacement list
-        index_map_init(&arg_to_idx);
+        index_map_init(&param_to_idx);
 
-        // Capture argument names
+        // Capture parameter names
         for (size_t idx = 0;; ++idx) {
             frame_next_token(frame_stack, &tmp);
             switch (tmp.type) {
             case TK_IDENTIFIER:
-                // Save index for argument name
-                index_map_put(&arg_to_idx, tmp.data, idx);
-                // Increase argument count
-                ++macro->num_args;
-                // Argument name followed either by a , or )
+                // Save index of parameter name
+                index_map_put(&param_to_idx, tmp.data, idx);
+                // Increase parameter count
+                ++macro->num_params;
+                // Paramter name must be followed either by a , or )
                 frame_next_token(frame_stack, &tmp);
                 if (tmp.type == TK_RIGHT_PAREN)
                     goto break_loop;
                 else if (tmp.type != TK_COMMA)
                     cpp_err();
                 break;
-            case TK_RIGHT_PAREN: // End of argument names
+            case TK_RIGHT_PAREN: // End of parameter names
                 goto break_loop;
             default:             // No other tokens are valid here
                 cpp_err();
@@ -268,15 +365,15 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
                  // End line or end file means end of macro
                 goto break_loop2;
             default:;
-                // Append token or argument index to replacement list
+                // Append token or parameter index to replacement list
                 replace *r = replace_vec_push(&macro->replacement_list);
-                size_t arg_idx;
+                size_t param_idx;
                 if (tmp.type == TK_IDENTIFIER &&
-                        index_map_get(&arg_to_idx, tmp.data, &arg_idx)) {
-                    r->type  = R_ARG;
-                    r->index = arg_idx;
+                        index_map_get(&param_to_idx, tmp.data, &param_idx)) {
+                    r->type  = R_PARAM;
+                    r->index = param_idx;
                 } else {
-                    r->type = R_TOK;
+                    r->type = R_TOKEN;
                     r->token = tmp;
                 }
             }
@@ -284,7 +381,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
         break_loop2:
 
         // Free index map
-        index_map_free(&arg_to_idx);
+        index_map_free(&param_to_idx);
     } else {
         // Normal macro
         macro->function_like = 0;
@@ -298,7 +395,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
             default:;
                 // Append token to replacement list
                 replace *r = replace_vec_push(&macro->replacement_list);
-                r->type  = R_TOK;
+                r->type  = R_TOKEN;
                 r->token = tmp;
                 break;
             }
@@ -308,57 +405,19 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
 }
 
 static void
-expand_macro(frame_vec *frame_stack, macro *macro)
+dir_undef(frame_vec *frame_stack, macro_map *macro_database)
 {
-    token_vec     cur_arg;
-    token_vec_vec arguments;
-    token         tmp;
+    token identifier;
 
-    // Capture arguments if the macro is function like
-    if (macro->function_like) {
-        // Initialize data structures
-        token_vec_init(&cur_arg);
-        token_vec_vec_init(&arguments);
+    // Macro name must be an identifier
+    frame_next_token(frame_stack, &identifier);
+    if (identifier.type != TK_IDENTIFIER)
+        cpp_err();
 
-        // Argument list needs to start with (
-        frame_next_token(frame_stack, &tmp);
-        if (tmp.type != TK_LEFT_PAREN)
-            cpp_err();
-
-        for (;;) {
-            frame_next_token(frame_stack, &tmp);
-            switch (tmp.type) {
-            case TK_END_FILE:    // Unexpected end of arguments
-            case TK_END_LINE:
-                cpp_err();
-                break;
-            case TK_COMMA:       // End of current argument
-                token_vec_vec_add(&arguments, cur_arg);
-                token_vec_init(&cur_arg);
-                break;
-            case TK_RIGHT_PAREN: // End of final argument
-                // Avoid adding empty argument to 0 arg macro
-                if (macro->num_args || cur_arg.n)
-                    token_vec_vec_add(&arguments, cur_arg);
-                goto endloop;
-            default:             // Add token to argument
-                token_vec_add(&cur_arg, tmp);
-                break;
-            }
-        }
-        endloop:;
-
-        // Make sure the macro has the correct number of arguments
-        if (macro->num_args != arguments.n)
-            cpp_err();
-    }
-
-    // Paint macro blue
-    macro->painted_blue = 1;
-
-    // Push macro frame
-    frame_push_macro(frame_stack, macro, arguments);
+    // Delete macro from database
+    macro_map_del(macro_database, identifier.data);
 }
+
 
 static void
 preprocess(FILE *fp)
@@ -379,7 +438,7 @@ preprocess(FILE *fp)
     recognize_directive = 1;
 
     for (;;) {
-        frame_next_token(&frame_stack, &token);
+        next_token_expand(&frame_stack, &macro_database, &token);
         switch (token.type) {
         case TK_END_FILE:
             // Exit loop on end of file
@@ -391,29 +450,24 @@ preprocess(FILE *fp)
         case TK_HASH:
             // Check if we need to recognize a directive
             if (recognize_directive) {
-                frame_next_token(&frame_stack, &token);
                 // Directive name must be an identifier
+                frame_next_token(&frame_stack, &token);
                 if (token.type != TK_IDENTIFIER)
                     cpp_err();
                 // Check for all supported directives
-                if (!strcmp(token.data, "define")) // #define
+                if (!strcmp(token.data, "define"))
                     dir_define(&frame_stack, &macro_database);
+                else if (!strcmp(token.data, "undef"))
+                    dir_undef(&frame_stack, &macro_database);
                 else
                     cpp_err();
                 // Swallow hash token
                 continue;
             }
+            // FALLTHROUGH
+        default:
+            recognize_directive = 0;
             break;
-        case TK_IDENTIFIER:;
-            // Check if the identifier is an active macro
-            macro *macro = macro_map_getptr(&macro_database, token.data);
-            if (macro && !macro->painted_blue) {
-                // Perform macro expension
-                expand_macro(&frame_stack, macro);
-                // Swallow identifier
-                continue;
-            }
-        default:;
         }
 
         // We need to output the token here

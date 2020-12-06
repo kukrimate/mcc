@@ -72,6 +72,8 @@ typedef struct {
 	token_type type;
     /* Original string (for identifiers/constants) */
     const char *data;
+    /* Expansion disabled (preprocessor cruft that probably shouldnt be here) */
+    _Bool      no_expand;
 } token;
 
 /* Get the next token from a char stream */

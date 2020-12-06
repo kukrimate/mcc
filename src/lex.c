@@ -284,6 +284,9 @@ lex_next_token(FILE *fp, token *token)
 {
     int ch;
 
+    // TODO: move this away from the lexer
+    token->no_expand = 0;
+
     retry:
     switch ((ch = mgetc(fp))) {
     // Whitespace

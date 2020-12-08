@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vec.h>
+#include <set.h>
 #include <map.h>
 #include <djb2.h>
 #include "lex.h"
@@ -17,6 +18,9 @@ VEC_GEN(token, token_)
 
 // Vector of token lists
 VEC_GEN(token_vec, token_vec_)
+
+// String set as a hideset
+SET_GEN(const char *, djb2_hash, !strcmp, str_)
 
 // String to int map (for parameter indexes)
 MAP_GEN(const char *, size_t, djb2_hash, !strcmp, index_)
@@ -38,8 +42,6 @@ typedef struct {
 VEC_GEN(replace, replace_)
 
 typedef struct {
-    // Is this macro currently callable?
-    _Bool       painted_blue;
     // Is this a function like macro?
     _Bool       function_like;
     // Number of parameters (if function like)
@@ -53,7 +55,6 @@ MAP_GEN(const char *, macro, djb2_hash, !strcmp, macro_)
 
 typedef enum {
     F_FILE,  // Directly from the lexer
-    F_MACRO, // Replacement list of a macro
     F_LIST,  // List of tokens in memory
 } frame_type;
 
@@ -64,15 +65,6 @@ typedef struct {
         struct {
             // File handle
             FILE          *fp;
-        };
-        // F_MACRO
-        struct {
-            // Macro definition
-            macro         *macro;
-            // Current position in replacement list
-            size_t        replace_idx;
-            // Arguments provided on macro call
-            token_vec_vec arguments;
         };
         // F_LIST
         struct {
@@ -132,18 +124,6 @@ frame_push_file(frame_vec *frame_stack, FILE *fp)
 }
 
 static void
-frame_push_macro(frame_vec *frame_stack, macro *macro, token_vec_vec arguments)
-{
-    frame *frame;
-
-    frame = frame_vec_push(frame_stack);
-    frame->type        = F_MACRO;
-    frame->macro       = macro;
-    frame->replace_idx = 0;
-    frame->arguments   = arguments;
-}
-
-static void
 frame_push_list(frame_vec *frame_stack, token_vec tokens)
 {
     frame *frame;
@@ -172,163 +152,187 @@ frame_next_token(frame_vec *frame_stack, token *token)
     frame *frame;
 
 recurse:
+    // Return end of file if the frame stack is empty
+    if (!frame_stack->n) {
+        token->type = TK_END_FILE;
+        return;
+    }
+
+    // Get most recent frame from the stack
     frame = frame_stack->arr + frame_stack->n - 1;
+
     switch (frame->type) {
     case F_FILE:
         // Read token directly from lexer
         lex_next_token(frame->fp, token);
         // Remove frame on end of file
-        if (token->type == TK_END_FILE)
+        if (token->type == TK_END_FILE) {
             --frame_stack->n;
-        break;
-    case F_MACRO:;
-        // Remove frame on the end of the replacement list
-        if (frame->replace_idx == frame->macro->replacement_list.n) {
-            // Remove blue pain from macro
-            frame->macro->painted_blue = 0;
-            --frame_stack->n;
-            // Recurse to get token from the frame under the macro
             goto recurse;
         }
-
-        // Get the next element of the macro's replacement list
-        replace r = frame->macro->replacement_list.arr[frame->replace_idx++];
-
-        switch (r.type) {
-        case R_TOKEN:
-            // Get token from replacement list
-            *token = r.token;
-            break;
-        case R_PARAM:
-            // Push argument list for required parameter
-            frame_push_list(frame_stack, frame->arguments.arr[r.index]);
-            // Recurse to get token from the new frame
-            goto recurse;
-        }
-
         break;
     case F_LIST:
         // Remove frame on the end of the token list
         if (frame->token_idx == frame->tokens.n) {
             --frame_stack->n;
-            // Recurse to get token from the frame under the macro
             goto recurse;
         }
-
         // Get token from the token list
         *token = frame->tokens.arr[frame->token_idx++];
         break;
     }
 }
 
+static token
+frame_peek(frame_vec *frame_stack)
+{
+    token token;
+
+    do {
+        frame_next_token(frame_stack, &token);
+    } while (token.type == TK_END_LINE);
+    frame_push_token(frame_stack, token);
+    return token;
+}
+
+// Capture arguments for each parameter
 static void
-next_token_expand(frame_vec *frame_stack,
-    macro_map *macro_database, token *token);
+capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameters)
+{
+    token     tmp;
+    token_vec arguments;
+    int       paren_nest;
+
+    // Argument list needs to start with (
+    frame_next_token(frame_stack, &tmp);
+    if (tmp.type != TK_LEFT_PAREN)
+        cpp_err();
+
+    // Initialize data structures
+    token_vec_vec_init(parameters);
+    token_vec_init(&arguments);
+
+    // Start at 1 deep parenthesis
+    paren_nest = 1;
+
+    for (;;) {
+        frame_next_token(frame_stack, &tmp);
+        switch (tmp.type) {
+        case TK_END_FILE:
+        case TK_END_LINE:
+            // Unexpected end of parameters
+            cpp_err();
+            break;
+        case TK_COMMA:
+            // Ignore comma in nested parenthesis
+            if (paren_nest > 1)
+                goto add_tok;
+            // End of current parameter
+            token_vec_vec_add(parameters, arguments);
+            token_vec_init(&arguments);
+            break;
+        case TK_LEFT_PAREN:
+            ++paren_nest;
+            goto add_tok;
+        case TK_RIGHT_PAREN:
+            --paren_nest;
+            // Mismatched parenthesis
+            if (paren_nest < 0)
+                cpp_err();
+            // End of parameters
+            if (!paren_nest)
+                goto endloop;
+            goto add_tok;
+        default:
+        add_tok:
+            // Add token to argument
+            token_vec_add(&arguments, tmp);
+            break;
+        }
+    }
+    endloop:
+
+    // Add arguments for last paremeter,
+    // avoid adding empty parameter to 0 parameter macro
+    if (macro->num_params || arguments.n)
+        token_vec_vec_add(parameters, arguments);
+
+    // Make sure the macro has the correct number of parameters
+    if (macro->num_params != parameters->n)
+        cpp_err();
+}
 
 static void
-expand_macro(frame_vec *frame_stack, macro_map *macro_database, macro *macro)
+next_token_expand(frame_vec *frame_stack, macro_map *macro_database, token *out);
+
+static _Bool
+expand_macro(frame_vec *frame_stack, macro_map *macro_database,
+    token identifier, str_set *hideset, token_vec *result)
 {
-    token_vec     cur_arg;
-    token_vec_vec arguments;
-    int           paren_nest;
-    token         tmp;
+    macro         *macro;
+    token_vec_vec parameters;
+    frame_vec     param_stack;
+
+    // See if the token can be expanded
+    if (identifier.type != TK_IDENTIFIER
+            || identifier.no_expand
+            || !(macro = macro_map_getptr(macro_database, identifier.data)))
+        return 0;
+
+    // Ignore function like macro name without parenthesis
+    if (macro->function_like && frame_peek(frame_stack).type != TK_LEFT_PAREN)
+        return 0;
+
+    // Add indetifier to the hideset
+    str_set_set(hideset, identifier.data);
 
     // Capture arguments if the macro is function like
-    if (macro->function_like) {
-        // Initialize data structures
-        token_vec_init(&cur_arg);
-        token_vec_vec_init(&arguments);
+    if (macro->function_like)
+        capture_arguments(frame_stack, macro, &parameters);
 
-        // Argument list needs to start with (
-        next_token_expand(frame_stack, macro_database, &tmp);
-        if (tmp.type != TK_LEFT_PAREN)
-            cpp_err();
-        paren_nest = 1;
-
-        for (;;) {
-            next_token_expand(frame_stack, macro_database, &tmp);
-            switch (tmp.type) {
-            case TK_END_FILE:    // Unexpected end of arguments
-            case TK_END_LINE:
-                cpp_err();
-                break;
-            case TK_COMMA:       // End of current argument
-                // Ignore comma in nested parenthesis
-                if (paren_nest > 1)
-                    goto add_tok;
-                token_vec_vec_add(&arguments, cur_arg);
-                token_vec_init(&cur_arg);
-                break;
-            case TK_LEFT_PAREN:
-                ++paren_nest;
-                goto add_tok;
-            case TK_RIGHT_PAREN:
-                --paren_nest;
-                if (paren_nest < 0) // Mismatched parenthesis
-                    cpp_err();
-                if (!paren_nest) {  // End of arguments
-                    // Avoid adding empty argument to 0 param macro
-                    if (macro->num_params || cur_arg.n)
-                        token_vec_vec_add(&arguments, cur_arg);
-                    goto endloop;
-                }
-                goto add_tok;
-            default:             // Add token to argument
-            add_tok:
-                token_vec_add(&cur_arg, tmp);
-                break;
+    // Iterate through replacement list
+    for (size_t i = 0; i < macro->replacement_list.n; ++i) {
+        replace replace_entry = macro->replacement_list.arr[i];
+        switch (replace_entry.type) {
+        case R_TOKEN:;
+            token tmp = replace_entry.token;
+            if (tmp.type == TK_IDENTIFIER && str_set_isset(hideset, tmp.data))
+                tmp.no_expand = 1;
+            token_vec_add(result, tmp);
+            break;
+        case R_PARAM:
+            // Create frame stack for parameter
+            frame_vec_init(&param_stack);
+            frame_push_list(&param_stack, parameters.arr[replace_entry.index]);
+            // Read all frames from the argument
+            for (;;) {
+                next_token_expand(&param_stack, macro_database, &tmp);
+                if (tmp.type == TK_END_FILE)
+                    break;
+                if (tmp.type == TK_IDENTIFIER && str_set_isset(hideset, tmp.data))
+                    tmp.no_expand = 1;
+                token_vec_add(result, tmp);
             }
+            break;
         }
-        endloop:
-
-        // Make sure the macro has the correct number of arguments
-        if (macro->num_params != arguments.n)
-            cpp_err();
     }
 
-    // Paint macro blue
-    macro->painted_blue = 1;
-
-    // Push macro frame
-    frame_push_macro(frame_stack, macro, arguments);
+    return 1;
 }
 
 void
-next_token_expand(frame_vec *frame_stack,
-    macro_map *macro_database, token *out)
+next_token_expand(frame_vec *frame_stack, macro_map *macro_database, token *out)
 {
-    token tmp;
-    _Bool function_like;
+    str_set   hideset;
+    token_vec result;
 
+    str_set_init(&hideset);
 recurse:
-
-    // Read token from frame stack
     frame_next_token(frame_stack, out);
-
-    // Non-identifiers can't expand
-    if (out->type != TK_IDENTIFIER || out->no_expand)
-        return;
-
-    // Check if the macro is function like
-    frame_next_token(frame_stack, &tmp);
-    function_like = tmp.type == TK_LEFT_PAREN;
-    frame_push_token(frame_stack, tmp);
-
-    // Check if this is macro to be expanded
-    macro *macro = macro_map_getptr(macro_database, out->data);
-
-    if (macro) {
-        if (macro->painted_blue) {
-            // Mark token for no further expansion if it did not expand because
-            // of self-referential macro ISO/IEC 9899 6.10.3.4
-            out->no_expand = 1;
-        } else if (function_like == macro->function_like) {
-            printf("Expanding: %s\n", out->data);
-            // Perform macro expension
-            expand_macro(frame_stack, macro_database, macro);
-            // Swallow identifier
-            goto recurse;
-        }
+    token_vec_init(&result);
+    if (expand_macro(frame_stack, macro_database, *out, &hideset, &result)) {
+        frame_push_list(frame_stack, result);
+        goto recurse;
     }
 }
 
@@ -346,7 +350,6 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
 
     // Put macro name into database and get pointer to struct
     macro = macro_map_putptr(macro_database, identifier.data);
-    macro->painted_blue = 0;
     replace_vec_init(&macro->replacement_list);
 
     frame_next_token(frame_stack, &tmp);

@@ -14,16 +14,16 @@
 //// TYPES start
 
 // Vector of tokens
-VEC_GEN(token, token_)
+VEC_GEN(token, token)
 
 // Vector of token lists
-VEC_GEN(token_vec, token_vec_)
+VEC_GEN(VECtoken, 2token)
 
 // String set as a hideset
-SET_GEN(const char *, djb2_hash, !strcmp, str_)
+SET_GEN(const char *, djb2_hash, !strcmp, str)
 
 // String to int map (for parameter indexes)
-MAP_GEN(const char *, size_t, djb2_hash, !strcmp, index_)
+MAP_GEN(const char *, size_t, djb2_hash, !strcmp, index)
 
 typedef enum {
     R_TOKEN, // Replace with a token
@@ -39,7 +39,7 @@ typedef struct {
 } replace;
 
 // Vector for creating the replacement list
-VEC_GEN(replace, replace_)
+VEC_GEN(replace, replace)
 
 typedef struct {
     // Is this a function like macro?
@@ -47,11 +47,11 @@ typedef struct {
     // Number of parameters (if function like)
     size_t      num_params;
     // Replacement list
-    replace_vec replacement_list;
+    VECreplace  replacement_list;
 } macro;
 
 // Hash map for storing macros
-MAP_GEN(const char *, macro, djb2_hash, !strcmp, macro_)
+MAP_GEN(const char *, macro, djb2_hash, !strcmp, macro)
 
 typedef enum {
     F_FILE,  // Directly from the lexer
@@ -69,7 +69,7 @@ typedef struct {
         // F_LIST
         struct {
             // Token list
-            token_vec     tokens;
+            VECtoken      tokens;
             // Current position in token list
             size_t        token_idx;
         };
@@ -77,7 +77,7 @@ typedef struct {
 } frame;
 
 // Vector of frames (as the preprocessor "stack")
-VEC_GEN(frame, frame_);
+VEC_GEN(frame, frame);
 
 //// TYPES end
 
@@ -100,54 +100,54 @@ output_token(token *token)
         break;
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
-        printf("%s", token->data);
+        printf("%s ", token->data);
         break;
     case TK_CHAR_CONST:
-        printf("\'%s\'", token->data);
+        printf("\'%s\' ", token->data);
         break;
     case TK_STRING_LIT:
-        printf("\"%s\"", token->data);
+        printf("\"%s\" ", token->data);
         break;
     default:
-        printf("%s", punctuator_str[token->type]);
+        printf("%s ", punctuator_str[token->type]);
     }
 }
 
 static void
-frame_push_file(frame_vec *frame_stack, FILE *fp)
+frame_push_file(VECframe *frame_stack, FILE *fp)
 {
     frame *frame;
 
-    frame = frame_vec_push(frame_stack);
+    frame = VECframe_push(frame_stack);
     frame->type = F_FILE;
     frame->fp   = fp;
 }
 
 static void
-frame_push_list(frame_vec *frame_stack, token_vec tokens)
+frame_push_list(VECframe *frame_stack, VECtoken tokens)
 {
     frame *frame;
 
-    frame = frame_vec_push(frame_stack);
+    frame = VECframe_push(frame_stack);
     frame->type      = F_LIST;
     frame->tokens    = tokens;
     frame->token_idx = 0;
 }
 
 static void
-frame_push_token(frame_vec *frame_stack, token token)
+frame_push_token(VECframe *frame_stack, token token)
 {
     frame *frame;
 
-    frame = frame_vec_push(frame_stack);
+    frame = VECframe_push(frame_stack);
     frame->type      = F_LIST;
-    token_vec_init(&frame->tokens);
-    token_vec_add(&frame->tokens, token);
+    VECtoken_init(&frame->tokens);
+    VECtoken_add(&frame->tokens, token);
     frame->token_idx = 0;
 }
 
 static void
-frame_next_token(frame_vec *frame_stack, token *token)
+frame_next_token(VECframe *frame_stack, token *token)
 {
     frame *frame;
 
@@ -184,7 +184,7 @@ recurse:
 }
 
 static token
-frame_peek(frame_vec *frame_stack)
+frame_peek(VECframe *frame_stack)
 {
     token token;
 
@@ -197,10 +197,10 @@ frame_peek(frame_vec *frame_stack)
 
 // Capture arguments for each parameter
 static void
-capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameters)
+capture_arguments(VECframe *frame_stack, macro *macro, VEC2token *parameters)
 {
     token     tmp;
-    token_vec arguments;
+    VECtoken  arguments;
     int       paren_nest;
 
     // Argument list needs to start with (
@@ -209,8 +209,8 @@ capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameter
         cpp_err();
 
     // Initialize data structures
-    token_vec_vec_init(parameters);
-    token_vec_init(&arguments);
+    VEC2token_init(parameters);
+    VECtoken_init(&arguments);
 
     // Start at 1 deep parenthesis
     paren_nest = 1;
@@ -228,8 +228,8 @@ capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameter
             if (paren_nest > 1)
                 goto add_tok;
             // End of current parameter
-            token_vec_vec_add(parameters, arguments);
-            token_vec_init(&arguments);
+            VEC2token_add(parameters, arguments);
+            VECtoken_init(&arguments);
             break;
         case TK_LEFT_PAREN:
             ++paren_nest;
@@ -246,7 +246,7 @@ capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameter
         default:
         add_tok:
             // Add token to argument
-            token_vec_add(&arguments, tmp);
+            VECtoken_add(&arguments, tmp);
             break;
         }
     }
@@ -255,7 +255,7 @@ capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameter
     // Add arguments for last paremeter,
     // avoid adding empty parameter to 0 parameter macro
     if (macro->num_params || arguments.n)
-        token_vec_vec_add(parameters, arguments);
+        VEC2token_add(parameters, arguments);
 
     // Make sure the macro has the correct number of parameters
     if (macro->num_params != parameters->n)
@@ -263,20 +263,20 @@ capture_arguments(frame_vec *frame_stack, macro *macro, token_vec_vec *parameter
 }
 
 static void
-next_token_expand(frame_vec *frame_stack, macro_map *macro_database, token *out);
+next_token_expand(VECframe *frame_stack, MAPmacro *macro_database, token *out);
 
 static _Bool
-expand_macro(frame_vec *frame_stack, macro_map *macro_database,
-    token identifier, str_set *hideset, token_vec *result)
+expand_macro(VECframe *frame_stack, MAPmacro *macro_database,
+    token identifier, SETstr *hideset, VECtoken *result)
 {
-    macro         *macro;
-    token_vec_vec parameters;
-    frame_vec     param_stack;
+    macro        *macro;
+    VEC2token    parameters;
+    VECframe     param_stack;
 
     // See if the token can be expanded
     if (identifier.type != TK_IDENTIFIER
             || identifier.no_expand
-            || !(macro = macro_map_getptr(macro_database, identifier.data)))
+            || !(macro = MAPmacro_get(macro_database, identifier.data)))
         return 0;
 
     // Ignore function like macro name without parenthesis
@@ -284,7 +284,7 @@ expand_macro(frame_vec *frame_stack, macro_map *macro_database,
         return 0;
 
     // Add indetifier to the hideset
-    str_set_set(hideset, identifier.data);
+    SETstr_set(hideset, identifier.data);
 
     // Capture arguments if the macro is function like
     if (macro->function_like)
@@ -296,22 +296,22 @@ expand_macro(frame_vec *frame_stack, macro_map *macro_database,
         switch (replace_entry.type) {
         case R_TOKEN:;
             token tmp = replace_entry.token;
-            if (tmp.type == TK_IDENTIFIER && str_set_isset(hideset, tmp.data))
+            if (tmp.type == TK_IDENTIFIER && SETstr_isset(hideset, tmp.data))
                 tmp.no_expand = 1;
-            token_vec_add(result, tmp);
+            VECtoken_add(result, tmp);
             break;
         case R_PARAM:
             // Create frame stack for parameter
-            frame_vec_init(&param_stack);
+            VECframe_init(&param_stack);
             frame_push_list(&param_stack, parameters.arr[replace_entry.index]);
             // Read all frames from the argument
             for (;;) {
                 next_token_expand(&param_stack, macro_database, &tmp);
                 if (tmp.type == TK_END_FILE)
                     break;
-                if (tmp.type == TK_IDENTIFIER && str_set_isset(hideset, tmp.data))
+                if (tmp.type == TK_IDENTIFIER && SETstr_isset(hideset, tmp.data))
                     tmp.no_expand = 1;
-                token_vec_add(result, tmp);
+                VECtoken_add(result, tmp);
             }
             break;
         }
@@ -321,15 +321,15 @@ expand_macro(frame_vec *frame_stack, macro_map *macro_database,
 }
 
 void
-next_token_expand(frame_vec *frame_stack, macro_map *macro_database, token *out)
+next_token_expand(VECframe *frame_stack, MAPmacro *macro_database, token *out)
 {
-    str_set   hideset;
-    token_vec result;
+    SETstr   hideset;
+    VECtoken result;
 
-    str_set_init(&hideset);
+    SETstr_init(&hideset);
 recurse:
     frame_next_token(frame_stack, out);
-    token_vec_init(&result);
+    VECtoken_init(&result);
     if (expand_macro(frame_stack, macro_database, *out, &hideset, &result)) {
         frame_push_list(frame_stack, result);
         goto recurse;
@@ -337,11 +337,11 @@ recurse:
 }
 
 static void
-dir_define(frame_vec *frame_stack, macro_map *macro_database)
+dir_define(VECframe *frame_stack, MAPmacro *macro_database)
 {
     macro *macro;
     token identifier, tmp;
-    index_map param_to_idx;
+    MAPindex param_to_idx;
 
     // Macro name must be an identifier
     frame_next_token(frame_stack, &identifier);
@@ -349,8 +349,8 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
         cpp_err();
 
     // Put macro name into database and get pointer to struct
-    macro = macro_map_putptr(macro_database, identifier.data);
-    replace_vec_init(&macro->replacement_list);
+    macro = MAPmacro_put(macro_database, identifier.data);
+    VECreplace_init(&macro->replacement_list);
 
     frame_next_token(frame_stack, &tmp);
     if (tmp.type == TK_LEFT_PAREN) {
@@ -359,7 +359,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
         macro->num_params    = 0;
 
         // Need index map to parse function like replacement list
-        index_map_init(&param_to_idx);
+        MAPindex_init(&param_to_idx);
 
         // Capture parameter names
         for (size_t idx = 0;; ++idx) {
@@ -367,7 +367,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
             switch (tmp.type) {
             case TK_IDENTIFIER:
                 // Save index of parameter name
-                index_map_put(&param_to_idx, tmp.data, idx);
+                *MAPindex_put(&param_to_idx, tmp.data) = idx;
                 // Increase parameter count
                 ++macro->num_params;
                 // Paramter name must be followed either by a , or )
@@ -395,12 +395,12 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
                 goto break_loop2;
             default:;
                 // Append token or parameter index to replacement list
-                replace *r = replace_vec_push(&macro->replacement_list);
-                size_t param_idx;
+                replace *r = VECreplace_push(&macro->replacement_list);
+                size_t *param_idx;
                 if (tmp.type == TK_IDENTIFIER &&
-                        index_map_get(&param_to_idx, tmp.data, &param_idx)) {
+                        (param_idx = MAPindex_get(&param_to_idx, tmp.data))) {
                     r->type  = R_PARAM;
-                    r->index = param_idx;
+                    r->index = *param_idx;
                 } else {
                     r->type = R_TOKEN;
                     r->token = tmp;
@@ -410,7 +410,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
         break_loop2:
 
         // Free index map
-        index_map_free(&param_to_idx);
+        MAPindex_free(&param_to_idx);
     } else {
         // Normal macro
         macro->function_like = 0;
@@ -423,7 +423,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
                 goto break_loop3;
             default:;
                 // Append token to replacement list
-                replace *r = replace_vec_push(&macro->replacement_list);
+                replace *r = VECreplace_push(&macro->replacement_list);
                 r->type  = R_TOKEN;
                 r->token = tmp;
                 break;
@@ -434,7 +434,7 @@ dir_define(frame_vec *frame_stack, macro_map *macro_database)
 }
 
 static void
-dir_undef(frame_vec *frame_stack, macro_map *macro_database)
+dir_undef(VECframe *frame_stack, MAPmacro *macro_database)
 {
     token identifier;
 
@@ -444,24 +444,24 @@ dir_undef(frame_vec *frame_stack, macro_map *macro_database)
         cpp_err();
 
     // Delete macro from database
-    macro_map_del(macro_database, identifier.data);
+    MAPmacro_del(macro_database, identifier.data);
 }
 
 
 static void
 preprocess(FILE *fp)
 {
-    frame_vec frame_stack;
-    macro_map macro_database;
+    VECframe frame_stack;
+    MAPmacro macro_database;
     _Bool     recognize_directive;
     token     token;
 
     // Initialize frame stack
-    frame_vec_init(&frame_stack);
+    VECframe_init(&frame_stack);
     frame_push_file(&frame_stack, fp);
 
     // Initialize macro database
-    macro_map_init(&macro_database);
+    MAPmacro_init(&macro_database);
 
     // Enable directive recognition at the start
     recognize_directive = 1;

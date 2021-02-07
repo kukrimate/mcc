@@ -1,4 +1,4 @@
-CFLAGS := -Ilibkm -std=c99 -D_GNU_SOURCE -Wall -Wextra -g
+CFLAGS := -Ilibkm/src -std=c99 -D_GNU_SOURCE -Wall -Wextra -g
 
 MCC := mcc
 OBJ := src/io.o src/lex.o src/cpp.o

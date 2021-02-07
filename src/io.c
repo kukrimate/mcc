@@ -9,9 +9,7 @@
  * Translation "Phase 1" aka map input file to "source charset", e.g.
  * for us it means replacing CRLF (Windows) or CR (Macintosh) with LF
  */
-static
-int
-_mgetc(FILE *fp)
+static int mgetc_newline(FILE *fp)
 {
     int ch;
 
@@ -35,19 +33,18 @@ _mgetc(FILE *fp)
  * Translation "Phase 2" aka line splicing, e.g. we remove \ + newline
  * This is the interface used by the C pre-processor to read characters
  */
-int
-mgetc(FILE *fp)
+int mgetc(FILE *fp)
 {
     int ch;
 
-    ch = _mgetc(fp);
+    ch = mgetc_newline(fp);
     if (ch == '\\') {
-        ch = _mgetc(fp);
+        ch = mgetc_newline(fp);
         if (ch != '\n') {
             ungetc(ch, fp);
             ch = '\\';
         } else {
-            ch = _mgetc(fp);
+            ch = mgetc_newline(fp);
         }
     }
 
@@ -57,8 +54,7 @@ mgetc(FILE *fp)
 /*
  * Peek at the next character without removing it from the stream
  */
-int
-mpeek(FILE *fp)
+int mpeek(FILE *fp)
 {
     int ch;
     ch = mgetc(fp);
@@ -69,12 +65,32 @@ mpeek(FILE *fp)
 /*
  * Peek at the next character and remove it from the stream if matches want
  */
-int
-mnext(FILE *fp, int want)
+int mnext(FILE *fp, int want)
 {
     int ch;
     ch = mgetc(fp);
     if (ch != want)
         ungetc(ch, fp);
     return ch;
+}
+
+/*
+ * Remove want from the stream
+ */
+_Bool mnextstr(FILE *fp, const char *want)
+{
+    int ch;
+    const char *cur;
+
+    for (cur = want; *cur; ++cur) {
+        ch = mgetc(fp);
+        if (ch != *cur) {
+            ungetc(ch, fp);
+            while (cur > want)
+                ungetc(*--cur, fp);
+            return 0;
+        }
+    }
+
+    return 1;
 }

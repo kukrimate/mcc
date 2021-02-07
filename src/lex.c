@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <vec.h>
 #include "io.h"
 #include "lex.h"
@@ -20,10 +21,10 @@ lex_err(void)
 static void
 identifier(int ch, FILE *fp, token *token)
 {
-    cvec buf;
+    VECc buf;
 
-    cvec_init(&buf);
-    cvec_add(&buf, ch);
+    VECc_init(&buf);
+    VECc_add(&buf, ch);
 
     for (;;)
         switch (mpeek(fp)) {
@@ -31,10 +32,10 @@ identifier(int ch, FILE *fp, token *token)
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            cvec_add(&buf, mgetc(fp));
+            VECc_add(&buf, mgetc(fp));
             break;
         default:
-            cvec_add(&buf, 0);
+            VECc_add(&buf, 0);
             token->type = TK_IDENTIFIER;
             token->data = buf.arr;
             return;
@@ -44,10 +45,10 @@ identifier(int ch, FILE *fp, token *token)
 static void
 pp_num(int ch, FILE *fp, token *token)
 {
-    cvec buf;
+    VECc buf;
 
-    cvec_init(&buf);
-    cvec_add(&buf, ch);
+    VECc_init(&buf);
+    VECc_add(&buf, ch);
 
     for (;;)
         switch (mpeek(fp)) {
@@ -57,7 +58,7 @@ pp_num(int ch, FILE *fp, token *token)
         case 'A' ... 'Z':
         case '0' ... '9':
             ch = mgetc(fp);
-            cvec_add(&buf, ch);
+            VECc_add(&buf, ch);
             switch (ch) {
             case 'e':
             case 'E':
@@ -66,12 +67,12 @@ pp_num(int ch, FILE *fp, token *token)
                 switch (mpeek(fp)) {
                 case '-':
                 case '+':
-                    cvec_add(&buf, mgetc(fp));
+                    VECc_add(&buf, mgetc(fp));
                 }
             }
             break;
         default:
-            cvec_add(&buf, 0);
+            VECc_add(&buf, 0);
             token->type = TK_PP_NUMBER;
             token->data = buf.arr;
             return;
@@ -79,7 +80,7 @@ pp_num(int ch, FILE *fp, token *token)
 }
 
 static void
-octal(FILE *fp, cvec *v, int ch)
+octal(FILE *fp, VECc *v, int ch)
 {
     ch -= '0';
     /* Octal constants only allow 3 digits max */
@@ -98,7 +99,7 @@ octal(FILE *fp, cvec *v, int ch)
         break;
     }
 endc:
-    cvec_add(v, ch);
+    VECc_add(v, ch);
 }
 
 static int
@@ -117,7 +118,7 @@ hexdigit_to_int(int ch)
 }
 
 static void
-hexadecimal(FILE *fp, cvec *v)
+hexadecimal(FILE *fp, VECc *v)
 {
     int ch;
 
@@ -135,39 +136,39 @@ hexadecimal(FILE *fp, cvec *v)
             goto endloop;
         }
 endloop:
-    cvec_add(v, ch);
+    VECc_add(v, ch);
 }
 
 static void
-escseq(FILE *fp, cvec *v, int ch)
+escseq(FILE *fp, VECc *v, int ch)
 {
     switch (ch = mgetc(fp)) {
     case '\'':  /* Simple escape sequences */
     case '"':
     case '?':
     case '\\':
-        cvec_add(v, ch);
+        VECc_add(v, ch);
         break;
     case 'a':
-        cvec_add(v, '\a');
+        VECc_add(v, '\a');
         break;
     case 'b':
-        cvec_add(v, '\b');
+        VECc_add(v, '\b');
         break;
     case 'f':
-        cvec_add(v, '\f');
+        VECc_add(v, '\f');
         break;
     case 'n':
-        cvec_add(v, '\n');
+        VECc_add(v, '\n');
         break;
     case 'r':
-        cvec_add(v, '\r');
+        VECc_add(v, '\r');
         break;
     case 't':
-        cvec_add(v, '\t');
+        VECc_add(v, '\t');
         break;
     case 'v':
-        cvec_add(v, '\v');
+        VECc_add(v, '\v');
         break;
     case '0' ... '7': /* Octal */
         octal(fp, v, ch);
@@ -184,16 +185,16 @@ escseq(FILE *fp, cvec *v, int ch)
 static void
 character(int ch, FILE *fp, token *token)
 {
-    cvec buf;
+    VECc buf;
 
-    cvec_init(&buf);
+    VECc_init(&buf);
 
     for (;;) {
         ch = mgetc(fp);
         switch (ch) {
         /* Normal character */
         default:
-            cvec_add(&buf, ch);
+            VECc_add(&buf, ch);
             break;
         /* Escape sequence */
         case '\\':
@@ -201,7 +202,7 @@ character(int ch, FILE *fp, token *token)
             break;
         /* End of character constant */
         case '\'':
-            cvec_add(&buf, 0);
+            VECc_add(&buf, 0);
             token->type = TK_CHAR_CONST;
             token->data = buf.arr;
             return;
@@ -216,16 +217,16 @@ character(int ch, FILE *fp, token *token)
 static void
 string(int ch, FILE *fp, token *token)
 {
-    cvec buf;
+    VECc buf;
 
-    cvec_init(&buf);
+    VECc_init(&buf);
 
     for (;;) {
         ch = mgetc(fp);
         switch (ch) {
         /* Normal character */
         default:
-            cvec_add(&buf, ch);
+            VECc_add(&buf, ch);
             break;
         /* Escape sequence */
         case '\\':
@@ -233,7 +234,7 @@ string(int ch, FILE *fp, token *token)
             break;
         /* End of string */
         case '\"':
-            cvec_add(&buf, 0);
+            VECc_add(&buf, 0);
             token->type = TK_STRING_LIT;
             token->data = buf.arr;
             return;
@@ -249,9 +250,9 @@ static void
 header_name(int endch, FILE *fp, token *token)
 {
     int ch;
-    cvec buf;
+    VECc buf;
 
-    cvec_init(&buf);
+    VECc_init(&buf);
 
     for (;;) {
         ch = mgetc(fp);
@@ -260,12 +261,12 @@ header_name(int endch, FILE *fp, token *token)
         default:
             /* End of header name */
             if (ch == endch) {
-                cvec_add(&buf, 0);
+                VECc_add(&buf, 0);
                 token->type = TK_HEADER_NAME;
                 token->data = buf.arr;
                 return;
             }
-            cvec_add(&buf, ch);
+            VECc_add(&buf, ch);
             break;
         /* Escape sequence */
         case '\\':
@@ -359,7 +360,7 @@ lex_next_token(FILE *fp, token *token)
             pp_num(ch, fp, token);
             return;
         }
-        if (mnext(fp, '.') == '.' && mnext(fp, '.') == '.') // ...
+        if (mnextstr(fp, ".."))                             // ...
             token->type = TK_VARARGS;
         else                                                // .
             token->type = TK_MEMBER;
@@ -427,8 +428,7 @@ lex_next_token(FILE *fp, token *token)
         } else if (mnext(fp, '>') == '>') {                 // %>
             token->type = TK_RIGHT_CURLY;
         } else if (mnext(fp, ':') == ':') {
-            if (mnext(fp, '%') == '%'
-                    && mnext(fp, ':') == ':')               // %:%:
+            if (mnextstr(fp, "%:"))                         // %:%:
                 token->type = TK_HASH_HASH;
             else                                            // %:
                 token->type = TK_HASH;

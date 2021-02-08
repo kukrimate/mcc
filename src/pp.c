@@ -94,22 +94,27 @@ cpp_err(void)
 static void
 output_token(token *token)
 {
+    size_t i;
+
+    for (i = 0; i < token->lwhite; ++i)
+        putchar(' ');
+
     switch (token->type) {
     case TK_END_LINE:
         putchar('\n');
         break;
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
-        printf("%s ", token->data);
+        printf("%s", token->data);
         break;
     case TK_CHAR_CONST:
-        printf("\'%s\' ", token->data);
+        printf("\'%s\'", token->data);
         break;
     case TK_STRING_LIT:
-        printf("\"%s\" ", token->data);
+        printf("\"%s\"", token->data);
         break;
     default:
-        printf("%s ", punctuator_str[token->type]);
+        printf("%s", punctuator_str[token->type]);
     }
 }
 

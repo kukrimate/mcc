@@ -11,15 +11,13 @@
 
 VEC_GEN(char, c)
 
-static void
-lex_err(void)
+static void lex_err(void)
 {
     fprintf(stderr, "Invalid token!\n");
     exit(1);
 }
 
-static void
-identifier(int ch, FILE *fp, token *token)
+static void identifier(int ch, FILE *fp, token *token)
 {
     VECc buf;
 
@@ -42,8 +40,7 @@ identifier(int ch, FILE *fp, token *token)
         }
 }
 
-static void
-pp_num(int ch, FILE *fp, token *token)
+static void pp_num(int ch, FILE *fp, token *token)
 {
     VECc buf;
 
@@ -79,58 +76,40 @@ pp_num(int ch, FILE *fp, token *token)
         }
 }
 
-static void
-octal(FILE *fp, VECc *v, int ch)
+static void octal(int ch, FILE *fp, VECc *v)
 {
     ch -= '0';
-    /* Octal constants only allow 3 digits max */
+    // Octal constants allow 3 digits max
     switch (mpeek(fp)) {
     case '0' ... '7':
-        ch <<= 3;
-        ch |= mgetc(fp) - '0';
+        ch = ch << 3 | (mgetc(fp) - '0');
         break;
     default:
         goto endc;
     }
     switch (mpeek(fp)) {
     case '0' ... '7':
-        ch <<= 3;
-        ch |= mgetc(fp) - '0';
+        ch = ch << 3 | (mgetc(fp) - '0');
         break;
     }
 endc:
     VECc_add(v, ch);
 }
 
-static int
-hexdigit_to_int(int ch)
+static void hexadecimal(int ch, FILE *fp, VECc *v)
 {
-    if (ch >= '0' && ch <= '9')
-        return ch - '0';
-    /* FIXME: assuming a-z and A-Z being continous is non-standard */
-    if (ch >= 'a' && ch <= 'f')
-        return 10 + (ch - 'a');
-    if (ch >= 'A' && ch <= 'F')
-        return 10 + (ch - 'A');
-    /* Not a valid hex digit */
-    lex_err();
-    return 0; /* Never reached, but makes gcc shut up */
-}
-
-static void
-hexadecimal(FILE *fp, VECc *v)
-{
-    int ch;
-
     ch = 0;
-    /* Hex constants can be any length */
+    // Hex constants can be any length
     for (;;)
         switch (mpeek(fp)) {
         case '0' ... '9':
+            ch = ch << 4 | (mgetc(fp) - '0');
+            break;
         case 'a' ... 'f':
+            ch = ch << 4 | (mgetc(fp) - 'a' + 0xa);
+            break;
         case 'A' ... 'F':
-            ch <<= 4;
-            ch |= hexdigit_to_int(mgetc(fp));
+            ch = ch << 4 | (mgetc(fp) - 'A' + 0xa);
             break;
         default:
             goto endloop;
@@ -139,11 +118,10 @@ endloop:
     VECc_add(v, ch);
 }
 
-static void
-escseq(FILE *fp, VECc *v, int ch)
+static void escseq(int ch, FILE *fp, VECc *v)
 {
     switch (ch = mgetc(fp)) {
-    case '\'':  /* Simple escape sequences */
+    case '\'':
     case '"':
     case '?':
     case '\\':
@@ -170,20 +148,19 @@ escseq(FILE *fp, VECc *v, int ch)
     case 'v':
         VECc_add(v, '\v');
         break;
-    case '0' ... '7': /* Octal */
-        octal(fp, v, ch);
+    case '0' ... '7':
+        octal(ch, fp, v);
         break;
-    case 'x':   /* Hexadecimal */
-        hexadecimal(fp, v);
+    case 'x':
+        hexadecimal(ch, fp, v);
         break;
-    /* Invalid escape sequence */
     default:
+        // Invalid escape sequence
         lex_err();
     }
 }
 
-static void
-character(int ch, FILE *fp, token *token)
+static void character(int ch, FILE *fp, token *token)
 {
     VECc buf;
 
@@ -198,7 +175,7 @@ character(int ch, FILE *fp, token *token)
             break;
         /* Escape sequence */
         case '\\':
-            escseq(fp, &buf, ch);
+            escseq(ch, fp, &buf);
             break;
         /* End of character constant */
         case '\'':
@@ -214,8 +191,7 @@ character(int ch, FILE *fp, token *token)
     }
 }
 
-static void
-string(int ch, FILE *fp, token *token)
+static void string(int ch, FILE *fp, token *token)
 {
     VECc buf;
 
@@ -230,7 +206,7 @@ string(int ch, FILE *fp, token *token)
             break;
         /* Escape sequence */
         case '\\':
-            escseq(fp, &buf, ch);
+            escseq(ch, fp, &buf);
             break;
         /* End of string */
         case '\"':
@@ -246,45 +222,11 @@ string(int ch, FILE *fp, token *token)
     }
 }
 
-static void
-header_name(int endch, FILE *fp, token *token)
-{
-    int ch;
-    VECc buf;
-
-    VECc_init(&buf);
-
-    for (;;) {
-        ch = mgetc(fp);
-        switch (ch) {
-        /* Normal character */
-        default:
-            /* End of header name */
-            if (ch == endch) {
-                VECc_add(&buf, 0);
-                token->type = TK_HEADER_NAME;
-                token->data = buf.arr;
-                return;
-            }
-            VECc_add(&buf, ch);
-            break;
-        /* Escape sequence */
-        case '\\':
-            escseq(fp, &buf, ch);
-            break;
-        /* Invalid string */
-        case EOF:
-        case '\n':
-            lex_err();
-        }
-    }
-}
-
-void
-lex_next_token(FILE *fp, token *token)
+void lex_next_token(FILE *fp, token *token)
 {
     int ch;
 
+    token->lwhite = 0;
     // TODO: move this away from the lexer
     token->no_expand = 0;
 
@@ -296,6 +238,7 @@ lex_next_token(FILE *fp, token *token)
     case '\v':
     case '\t':
     case ' ':
+        ++token->lwhite;
         goto retry;
     // End of file
     case EOF:
@@ -406,14 +349,17 @@ lex_next_token(FILE *fp, token *token)
     case '/':
         if (mnext(fp, '/') == '/') {                        // Line comment
             while (mgetc(fp) != '\n');
+            ++token->lwhite;
             goto retry;
         } else if (mnext(fp, '*') == '*') {                 // Block comment
             for (;;) {
                 ch = mgetc(fp);
                 if (ch == EOF)
                     lex_err();
-                if (ch == '*' && mnext(fp, '/') == '/')
+                if (ch == '*' && mnext(fp, '/') == '/') {
+                    ++token->lwhite;
                     goto retry;
+                }
             }
         }
 

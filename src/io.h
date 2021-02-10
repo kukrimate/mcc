@@ -1,12 +1,27 @@
 #ifndef IO_H
 #define IO_H
 
-int mgetc(FILE *fp);
+typedef enum {
+    IO_STR,
+    IO_FILE,
+} IoType;
 
-int mpeek(FILE *fp);
+typedef struct {
+    IoType type;
+    union {
+        // IO_STR
+        const char *str;
+        // IO_FILE
+        FILE *fp;
+    };
+} Io;
 
-int mnext(FILE *fp, int want);
+int mgetc(Io *io);
 
-_Bool mnextstr(FILE *fp, const char *want);
+int mpeek(Io *io);
+
+_Bool mnext(Io *io, int want);
+
+_Bool mnextstr(Io *io, const char *want);
 
 #endif

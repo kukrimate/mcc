@@ -3,8 +3,6 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <vec.h>
 #include <set.h>
 #include <map.h>
@@ -12,9 +10,6 @@
 #include "lex.h"
 
 //// TYPES start
-
-// Vector of tokens
-VEC_GEN(token, token)
 
 // Vector of token lists
 VEC_GEN(VECtoken, 2token)
@@ -54,17 +49,16 @@ typedef struct {
 MAP_GEN(const char *, macro, djb2_hash, !strcmp, macro)
 
 typedef enum {
-    F_FILE,  // Directly from the lexer
-    F_LIST,  // List of tokens in memory
+    F_LEXER,  // Directly from the lexer
+    F_LIST,   // List of tokens in memory
 } frame_type;
 
 typedef struct {
     frame_type type;
     union {
-        // F_FILE
+        // F_LEXER
         struct {
-            // File handle
-            FILE          *fp;
+            LexCtx ctx;
         };
         // F_LIST
         struct {
@@ -83,53 +77,22 @@ VEC_GEN(frame, frame);
 
 //// CODE start
 
-static void
-cpp_err(void)
+static void cpp_err(void)
 {
     fprintf(stderr, "Preprocessor error!\n");
     exit(1);
 }
 
-
-static void
-output_token(token *token)
-{
-    size_t i;
-
-    for (i = 0; i < token->lwhite; ++i)
-        putchar(' ');
-
-    switch (token->type) {
-    case TK_END_LINE:
-        putchar('\n');
-        break;
-    case TK_IDENTIFIER:
-    case TK_PP_NUMBER:
-        printf("%s", token->data);
-        break;
-    case TK_CHAR_CONST:
-        printf("\'%s\'", token->data);
-        break;
-    case TK_STRING_LIT:
-        printf("\"%s\"", token->data);
-        break;
-    default:
-        printf("%s", punctuator_str[token->type]);
-    }
-}
-
-static void
-frame_push_file(VECframe *frame_stack, FILE *fp)
+static void frame_push_file(VECframe *frame_stack, Io *io)
 {
     frame *frame;
 
     frame = VECframe_push(frame_stack);
-    frame->type = F_FILE;
-    frame->fp   = fp;
+    frame->type = F_LEXER;
+    lex_init(&frame->ctx, io);
 }
 
-static void
-frame_push_list(VECframe *frame_stack, VECtoken tokens)
+static void frame_push_list(VECframe *frame_stack, VECtoken tokens)
 {
     frame *frame;
 
@@ -139,43 +102,27 @@ frame_push_list(VECframe *frame_stack, VECtoken tokens)
     frame->token_idx = 0;
 }
 
-static void
-frame_push_token(VECframe *frame_stack, token token)
+static token frame_next(VECframe *frame_stack)
 {
-    frame *frame;
-
-    frame = VECframe_push(frame_stack);
-    frame->type      = F_LIST;
-    VECtoken_init(&frame->tokens);
-    VECtoken_add(&frame->tokens, token);
-    frame->token_idx = 0;
-}
-
-static void
-frame_next_token(VECframe *frame_stack, token *token)
-{
-    frame *frame;
-
 recurse:
     // Return end of file if the frame stack is empty
-    if (!frame_stack->n) {
-        token->type = TK_END_FILE;
-        return;
-    }
+    if (!frame_stack->n)
+        return (token) { .type = TK_END_FILE };
 
     // Get most recent frame from the stack
-    frame = frame_stack->arr + frame_stack->n - 1;
+    frame *frame = VECframe_top(frame_stack);
 
     switch (frame->type) {
-    case F_FILE:
+    case F_LEXER:
         // Read token directly from lexer
-        lex_next_token(frame->fp, token);
+        ;token tmp;
+        lex_next(&frame->ctx, &tmp);
         // Remove frame on end of file
-        if (token->type == TK_END_FILE) {
+        if (tmp.type == TK_END_FILE) {
             --frame_stack->n;
             goto recurse;
         }
-        break;
+        return tmp;
     case F_LIST:
         // Remove frame on the end of the token list
         if (frame->token_idx == frame->tokens.n) {
@@ -183,34 +130,57 @@ recurse:
             goto recurse;
         }
         // Get token from the token list
-        *token = frame->tokens.arr[frame->token_idx++];
-        break;
+        return frame->tokens.arr[frame->token_idx++];
     }
+
+    // non-reachable
+    abort();
 }
 
-static token
-frame_peek(VECframe *frame_stack)
+static token frame_peek(VECframe *frame_stack)
 {
-    token token;
+recurse:
+    // Return end of file if the frame stack is empty
+    if (!frame_stack->n)
+        return (token) { .type = TK_END_FILE };
 
-    do {
-        frame_next_token(frame_stack, &token);
-    } while (token.type == TK_END_LINE);
-    frame_push_token(frame_stack, token);
-    return token;
+    // Get most recent frame from the stack
+    frame *frame = VECframe_top(frame_stack);
+
+    switch (frame->type) {
+    case F_LEXER:
+        // Read token directly from lexer
+        ;token tmp;
+        lex_peek(&frame->ctx, &tmp);
+        // Remove frame on end of file
+        if (tmp.type == TK_END_FILE) {
+            --frame_stack->n;
+            goto recurse;
+        }
+        return tmp;
+    case F_LIST:
+        // Remove frame on the end of the token list
+        if (frame->token_idx == frame->tokens.n) {
+            --frame_stack->n;
+            goto recurse;
+        }
+        // Get token from the token list
+        return frame->tokens.arr[frame->token_idx];
+    }
+
+    // non-reachable
+    abort();
 }
 
 // Capture arguments for each parameter
-static void
-capture_arguments(VECframe *frame_stack, macro *macro, VEC2token *parameters)
+static void capture_arguments(VECframe *frame_stack, macro *macro, VEC2token *parameters)
 {
     token     tmp;
     VECtoken  arguments;
     int       paren_nest;
 
     // Argument list needs to start with (
-    frame_next_token(frame_stack, &tmp);
-    if (tmp.type != TK_LEFT_PAREN)
+    if (frame_next(frame_stack).type != TK_LEFT_PAREN)
         cpp_err();
 
     // Initialize data structures
@@ -221,7 +191,7 @@ capture_arguments(VECframe *frame_stack, macro *macro, VEC2token *parameters)
     paren_nest = 1;
 
     for (;;) {
-        frame_next_token(frame_stack, &tmp);
+        tmp = frame_next(frame_stack);
         switch (tmp.type) {
         case TK_END_FILE:
         case TK_END_LINE:
@@ -267,11 +237,9 @@ capture_arguments(VECframe *frame_stack, macro *macro, VEC2token *parameters)
         cpp_err();
 }
 
-static void
-next_token_expand(VECframe *frame_stack, MAPmacro *macro_database, token *out);
+static token next_token_expand(VECframe *frame_stack, MAPmacro *macro_database);
 
-static _Bool
-expand_macro(VECframe *frame_stack, MAPmacro *macro_database,
+static _Bool expand_macro(VECframe *frame_stack, MAPmacro *macro_database,
     token identifier, SETstr *hideset, VECtoken *result)
 {
     macro        *macro;
@@ -283,6 +251,10 @@ expand_macro(VECframe *frame_stack, MAPmacro *macro_database,
             || identifier.no_expand
             || !(macro = MAPmacro_get(macro_database, identifier.data)))
         return 0;
+
+    // Eat all newlines
+    while (frame_peek(frame_stack).type == TK_END_LINE)
+        frame_next(frame_stack);
 
     // Ignore function like macro name without parenthesis
     if (macro->function_like && frame_peek(frame_stack).type != TK_LEFT_PAREN)
@@ -311,7 +283,7 @@ expand_macro(VECframe *frame_stack, MAPmacro *macro_database,
             frame_push_list(&param_stack, parameters.arr[replace_entry.index]);
             // Read all frames from the argument
             for (;;) {
-                next_token_expand(&param_stack, macro_database, &tmp);
+                tmp = next_token_expand(&param_stack, macro_database);
                 if (tmp.type == TK_END_FILE)
                     break;
                 if (tmp.type == TK_IDENTIFIER && SETstr_isset(hideset, tmp.data))
@@ -325,31 +297,30 @@ expand_macro(VECframe *frame_stack, MAPmacro *macro_database,
     return 1;
 }
 
-void
-next_token_expand(VECframe *frame_stack, MAPmacro *macro_database, token *out)
+token next_token_expand(VECframe *frame_stack, MAPmacro *macro_database)
 {
     SETstr   hideset;
     VECtoken result;
 
     SETstr_init(&hideset);
 recurse:
-    frame_next_token(frame_stack, out);
+    ;token tmp = frame_next(frame_stack);
     VECtoken_init(&result);
-    if (expand_macro(frame_stack, macro_database, *out, &hideset, &result)) {
+    if (expand_macro(frame_stack, macro_database, tmp, &hideset, &result)) {
         frame_push_list(frame_stack, result);
         goto recurse;
     }
+    return tmp;
 }
 
-static void
-dir_define(VECframe *frame_stack, MAPmacro *macro_database)
+static void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
 {
     macro *macro;
     token identifier, tmp;
     MAPindex param_to_idx;
 
     // Macro name must be an identifier
-    frame_next_token(frame_stack, &identifier);
+    identifier = frame_next(frame_stack);
     if (identifier.type != TK_IDENTIFIER)
         cpp_err();
 
@@ -357,7 +328,7 @@ dir_define(VECframe *frame_stack, MAPmacro *macro_database)
     macro = MAPmacro_put(macro_database, identifier.data);
     VECreplace_init(&macro->replacement_list);
 
-    frame_next_token(frame_stack, &tmp);
+    tmp = frame_next(frame_stack);
     if (tmp.type == TK_LEFT_PAREN) {
         // Function like macro
         macro->function_like = 1;
@@ -368,7 +339,7 @@ dir_define(VECframe *frame_stack, MAPmacro *macro_database)
 
         // Capture parameter names
         for (size_t idx = 0;; ++idx) {
-            frame_next_token(frame_stack, &tmp);
+            tmp = frame_next(frame_stack);
             switch (tmp.type) {
             case TK_IDENTIFIER:
                 // Save index of parameter name
@@ -376,7 +347,7 @@ dir_define(VECframe *frame_stack, MAPmacro *macro_database)
                 // Increase parameter count
                 ++macro->num_params;
                 // Paramter name must be followed either by a , or )
-                frame_next_token(frame_stack, &tmp);
+                tmp = frame_next(frame_stack);
                 if (tmp.type == TK_RIGHT_PAREN)
                     goto break_loop;
                 else if (tmp.type != TK_COMMA)
@@ -392,7 +363,7 @@ dir_define(VECframe *frame_stack, MAPmacro *macro_database)
 
         // Capture replacement list
         for (;;) {
-            frame_next_token(frame_stack, &tmp);
+            tmp = frame_next(frame_stack);
             switch (tmp.type) {
             case TK_END_FILE:
             case TK_END_LINE:
@@ -420,7 +391,7 @@ dir_define(VECframe *frame_stack, MAPmacro *macro_database)
         // Normal macro
         macro->function_like = 0;
 
-        for (;; frame_next_token(frame_stack, &tmp)) {
+        for (;; tmp = frame_next(frame_stack)) {
             switch (tmp.type) {
             case TK_END_FILE:
             case TK_END_LINE:
@@ -438,13 +409,12 @@ dir_define(VECframe *frame_stack, MAPmacro *macro_database)
     }
 }
 
-static void
-dir_undef(VECframe *frame_stack, MAPmacro *macro_database)
+static void dir_undef(VECframe *frame_stack, MAPmacro *macro_database)
 {
     token identifier;
 
     // Macro name must be an identifier
-    frame_next_token(frame_stack, &identifier);
+    identifier = frame_next(frame_stack);
     if (identifier.type != TK_IDENTIFIER)
         cpp_err();
 
@@ -452,9 +422,11 @@ dir_undef(VECframe *frame_stack, MAPmacro *macro_database)
     MAPmacro_del(macro_database, identifier.data);
 }
 
+typedef struct {
 
-static void
-preprocess(FILE *fp)
+} PpDirective;
+
+static void preprocess(Io *io)
 {
     VECframe frame_stack;
     MAPmacro macro_database;
@@ -463,7 +435,7 @@ preprocess(FILE *fp)
 
     // Initialize frame stack
     VECframe_init(&frame_stack);
-    frame_push_file(&frame_stack, fp);
+    frame_push_file(&frame_stack, io);
 
     // Initialize macro database
     MAPmacro_init(&macro_database);
@@ -472,7 +444,7 @@ preprocess(FILE *fp)
     recognize_directive = 1;
 
     for (;;) {
-        next_token_expand(&frame_stack, &macro_database, &token);
+        token = next_token_expand(&frame_stack, &macro_database);
         switch (token.type) {
         case TK_END_FILE:
             // Exit loop on end of file
@@ -485,7 +457,7 @@ preprocess(FILE *fp)
             // Check if we need to recognize a directive
             if (recognize_directive) {
                 // Directive name must be an identifier
-                frame_next_token(&frame_stack, &token);
+                token = frame_next(&frame_stack);
                 if (token.type != TK_IDENTIFIER)
                     cpp_err();
                 // Check for all supported directives
@@ -515,6 +487,7 @@ main(int argc, char *argv[])
 {
     char *path;
     FILE *fp;
+    Io io;
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s FILE\n", argv[0]);
@@ -522,13 +495,15 @@ main(int argc, char *argv[])
     }
 
     path = argv[1];
-
     if (!(fp = fopen(path, "r"))) {
         perror(path);
         return 1;
     }
 
-    preprocess(fp);
+    io.type = IO_FILE;
+    io.fp = fp;
+    preprocess(&io);
+
     fclose(fp);
     return 0;
 }

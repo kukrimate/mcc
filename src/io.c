@@ -5,23 +5,51 @@
 #include <stdio.h>
 #include "io.h"
 
+static int io_getc(Io *io)
+{
+    int ch;
+
+    switch (io->type) {
+    case IO_STR:
+        ch = *io->str++;
+        return ch ? ch : EOF;
+    case IO_FILE:
+        return fgetc(io->fp);
+    }
+
+    // never reached
+    return EOF;
+}
+
+static void io_ungetc(int ch, Io *io)
+{
+    switch (io->type) {
+    case IO_STR:
+        --io->str;
+        break;
+    case IO_FILE:
+        ungetc(ch, io->fp);
+        break;
+    }
+}
+
 /*
  * Translation "Phase 1" aka map input file to "source charset", e.g.
  * for us it means replacing CRLF (Windows) or CR (Macintosh) with LF
  */
-static int mgetc_newline(FILE *fp)
+static int mgetc_newline(Io *io)
 {
     int ch;
 
-    ch = fgetc(fp);
+    ch = io_getc(io);
 
     /* Convert a CRLF or CR into an LF */
     if (ch == '\r') {
-        ch = fgetc(fp);
+        ch = io_getc(io);
 
         /* Remove the next character from the stream if it's an LF */
         if (ch != '\n') {
-            ungetc(ch, fp);
+            io_ungetc(ch, io);
             ch = '\n';
         }
     }
@@ -33,18 +61,18 @@ static int mgetc_newline(FILE *fp)
  * Translation "Phase 2" aka line splicing, e.g. we remove \ + newline
  * This is the interface used by the C pre-processor to read characters
  */
-int mgetc(FILE *fp)
+int mgetc(Io *io)
 {
     int ch;
 
-    ch = mgetc_newline(fp);
+    ch = mgetc_newline(io);
     if (ch == '\\') {
-        ch = mgetc_newline(fp);
+        ch = mgetc_newline(io);
         if (ch != '\n') {
-            ungetc(ch, fp);
+            io_ungetc(ch, io);
             ch = '\\';
         } else {
-            ch = mgetc_newline(fp);
+            ch = mgetc_newline(io);
         }
     }
 
@@ -54,40 +82,46 @@ int mgetc(FILE *fp)
 /*
  * Peek at the next character without removing it from the stream
  */
-int mpeek(FILE *fp)
+int mpeek(Io *io)
 {
     int ch;
-    ch = mgetc(fp);
-    ungetc(ch, fp);
-    return ch;
-}
 
-/*
- * Peek at the next character and remove it from the stream if matches want
- */
-int mnext(FILE *fp, int want)
-{
-    int ch;
-    ch = mgetc(fp);
-    if (ch != want)
-        ungetc(ch, fp);
+    ch = mgetc(io);
+    io_ungetc(ch, io);
+
     return ch;
 }
 
 /*
  * Remove want from the stream
  */
-_Bool mnextstr(FILE *fp, const char *want)
+_Bool mnext(Io *io, int want)
+{
+    int ch;
+
+    ch = mgetc(io);
+    if (ch != want) {
+        io_ungetc(ch, io);
+        return 0;
+    }
+
+    return 1;
+}
+
+/*
+ * Remove want from the stream
+ */
+_Bool mnextstr(Io *io, const char *want)
 {
     int ch;
     const char *cur;
 
     for (cur = want; *cur; ++cur) {
-        ch = mgetc(fp);
+        ch = mgetc(io);
         if (ch != *cur) {
-            ungetc(ch, fp);
+            io_ungetc(ch, io);
             while (cur > want)
-                ungetc(*--cur, fp);
+                io_ungetc(*--cur, io);
             return 0;
         }
     }

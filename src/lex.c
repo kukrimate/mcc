@@ -3,9 +3,12 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <vec.h>
+#include "io.h"
+#include "token.h"
 #include "lex.h"
-
-VEC_GEN(char, c)
 
 static void lex_err(void)
 {

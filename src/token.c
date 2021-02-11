@@ -3,6 +3,9 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <vec.h>
 #include "token.h"
 
 // Punctuator to string table
@@ -55,6 +58,7 @@ static const char *punctuator_str[] = {
     [TK_COMMA        ] = ",",
     [TK_HASH         ] = "#",
     [TK_HASH_HASH    ] = "##",
+    [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
 void output_token(token *token)
@@ -79,4 +83,32 @@ void output_token(token *token)
     default:
         printf("%s", punctuator_str[token->type]);
     }
+}
+
+void stringify_token(_Bool add_white, token *token, VECc *out)
+{
+    char buffer[4096];
+
+    if (out->n && add_white)
+        for (size_t i = 0; i < token->lwhite; ++i)
+            VECc_add(out, ' ');
+
+    switch (token->type) {
+    case TK_END_LINE: // Ignore, not an actual token per C standard
+        return;
+    case TK_IDENTIFIER:
+    case TK_PP_NUMBER:
+        snprintf(buffer, sizeof buffer, "%s", token->data);
+        break;
+    case TK_CHAR_CONST:
+        snprintf(buffer, sizeof buffer, "\'%s\'", token->data);
+        break;
+    case TK_STRING_LIT:
+        snprintf(buffer, sizeof buffer, "\"%s\"", token->data);
+        break;
+    default:
+        snprintf(buffer, sizeof buffer, "%s", punctuator_str[token->type]);
+    }
+
+    VECc_addall(out, buffer, strlen(buffer));
 }

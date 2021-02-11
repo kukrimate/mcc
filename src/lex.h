@@ -1,9 +1,6 @@
 #ifndef LEX_H
 #define LEX_H
 
-#include "io.h"
-#include "token.h"
-
 typedef struct {
     // Underlying IO handle
     Io *io;

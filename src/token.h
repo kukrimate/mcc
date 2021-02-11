@@ -1,8 +1,6 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 
-#include <vec.h>
-
 typedef enum {
     /* Terminators */
     TK_END_FILE     = 0,
@@ -66,6 +64,9 @@ typedef enum {
     TK_COMMA        = 0x12d, /* ,   */
     TK_HASH         = 0x12e, /* #   */
     TK_HASH_HASH    = 0x12f, /* ##  */
+
+    /* Placemarker (used when applying the ## opeartor) */
+    TK_PLACEMARKER  = 0x200,
 } token_type;
 
 typedef struct {
@@ -84,5 +85,11 @@ VEC_GEN(token, token);
 
 // Output a token to the screen
 void output_token(token *token);
+
+// Character vector for stringify
+VEC_GEN(char, c)
+
+// Stringify token adding the result to a vector
+void stringify_token(_Bool add_white, token *token, VECc *out);
 
 #endif

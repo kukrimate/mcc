@@ -298,13 +298,13 @@ static void lex_read(Io *io, token *token)
         return;
     case '.':
         switch (mpeek(io)) {
-        case '0' ... '9':                                   // PP-num
+        case '0' ... '9':                              // PP-num
             pp_num(ch, io, token);
             return;
         }
         if (mnextstr(io, ".."))                        // ...
             token->type = TK_VARARGS;
-        else                                                // .
+        else                                           // .
             token->type = TK_MEMBER;
         return;
     case '-':
@@ -314,7 +314,7 @@ static void lex_read(Io *io, token *token)
             token->type = TK_MINUS_MINUS;
         else if (mnext(io, '='))                       // -=
             token->type = TK_SUB_EQUAL;
-        else                                                // -
+        else                                           // -
             token->type = TK_MINUS;
         return;
     case '+':
@@ -322,7 +322,7 @@ static void lex_read(Io *io, token *token)
             token->type = TK_PLUS_PLUS;
         else if (mnext(io, '='))                       // +=
             token->type = TK_ADD_EQUAL;
-        else                                                // +
+        else                                           // +
             token->type = TK_PLUS;
         return;
     case '&':
@@ -330,19 +330,19 @@ static void lex_read(Io *io, token *token)
             token->type = TK_LOGIC_AND;
         else if (mnext(io, '='))                       // &=
             token->type = TK_AND_EQUAL;
-        else                                                // &
+        else                                           // &
             token->type = TK_AMPERSAND;
         return;
     case '*':
         if (mnext(io, '='))                            // *=
             token->type = TK_MUL_EQUAL;
-        else                                                // *
+        else                                           // *
             token->type = TK_STAR;
         return;
     case '!':
         if (mnext(io, '='))                            // !=
             token->type = TK_NOT_EQUAL;
-        else                                                // !
+        else                                           // !
             token->type = TK_EXCL_MARK;
         return;
     case '/':
@@ -364,7 +364,7 @@ static void lex_read(Io *io, token *token)
 
         if (mnext(io, '='))                            // /=
             token->type = TK_DIV_EQUAL;
-        else                                                // /
+        else                                           // /
             token->type = TK_FWD_SLASH;
         return;
     case '%':
@@ -375,9 +375,9 @@ static void lex_read(Io *io, token *token)
         } else if (mnext(io, ':')) {
             if (mnextstr(io, "%:"))                    // %:%:
                 token->type = TK_HASH_HASH;
-            else                                            // %:
+            else                                       // %:
                 token->type = TK_HASH;
-        } else {                                            // %
+        } else {                                       // %
             token->type = TK_PERCENT;
         }
         return;
@@ -385,7 +385,7 @@ static void lex_read(Io *io, token *token)
         if (mnext(io, '<')) {
             if (mnext(io, '='))                        // <<=
                 token->type = TK_LSHIFT_EQUAL;
-            else                                            // <<
+            else                                       // <<
                 token->type = TK_LEFT_SHIFT;
         } else if (mnext(io, '=')) {                   // <=
             token->type = TK_LESS_EQUAL;
@@ -393,7 +393,7 @@ static void lex_read(Io *io, token *token)
             token->type = TK_LEFT_SQUARE;
         } else if (mnext(io, '%')) {                   // <%
             token->type = TK_LEFT_CURLY;
-        } else {                                            // <
+        } else {                                       // <
             token->type = TK_LEFT_ANGLE;
         }
         return;
@@ -401,24 +401,24 @@ static void lex_read(Io *io, token *token)
         if (mnext(io, '>')) {
             if (mnext(io, '='))                        // >>=
                 token->type = TK_RSHIFT_EQUAL;
-            else                                            // >>
+            else                                       // >>
                 token->type = TK_RIGHT_SHIFT;
         } else if (mnext(io, '=')) {                   // >=
             token->type = TK_MORE_EQUAL;
-        } else {                                            // >
+        } else {                                       // >
             token->type = TK_RIGHT_ANGLE;
         }
         return;
     case '=':
         if (mnext(io, '='))                            // ==
             token->type = TK_EQUAL_EQUAL;
-        else                                                // =
+        else                                           // =
             token->type = TK_EQUAL;
         return;
     case '^':
         if (mnext(io, '='))                            // ^=
             token->type = TK_XOR_EQUAL;
-        else                                                // ^
+        else                                           // ^
             token->type = TK_CARET;
         return;
     case '|':
@@ -426,19 +426,19 @@ static void lex_read(Io *io, token *token)
             token->type = TK_LOGIC_OR;
         else if (mnext(io, '='))                       // |=
             token->type = TK_OR_EQUAL;
-        else                                                // |
+        else                                           // |
             token->type = TK_VERTICAL_BAR;
         return;
     case ':':
         if (mnext(io, '>'))                            // :>
             token->type = TK_RIGHT_SQUARE;
-        else                                                // :
+        else                                           // :
             token->type = TK_COLON;
         return;
     case '#':
         if (mnext(io, '#'))                            // ##
             token->type = TK_HASH_HASH;
-        else                                                // #
+        else                                           // #
             token->type = TK_HASH;
         return;
     default:

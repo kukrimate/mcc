@@ -1,2 +1,5 @@
+# Currently contains non-redistributable documentation
+doc
+# Binaries
 *.o
 mcc

@@ -95,7 +95,6 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
         // Basic token from the replacement list becomes part of the result
         if (replace->type == R_TOKEN) {
             token tmp = replace->token;
-            tmp.no_expand = 1;
             VECtoken_add(result, tmp);
             continue;
         }
@@ -323,7 +322,7 @@ void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
         // Free index map
         MAPindex_free(&param_to_idx);
     } else {
-        // Normal macro
+        // Object-like macro
         macro->function_like = 0;
 
         for (;; tmp = frame_next(frame_stack)) {

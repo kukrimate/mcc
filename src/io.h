@@ -1,27 +1,20 @@
 #ifndef IO_H
 #define IO_H
 
-typedef enum {
-    IO_STR,
-    IO_FILE,
-} IoType;
+typedef struct Io Io;
 
-typedef struct {
-    IoType type;
-    union {
-        // IO_STR
-        const char *str;
-        // IO_FILE
-        FILE *fp;
-    };
-} Io;
+// Open an Io handle to a file on disk
+Io *mopen(const char *path);
+// Open an Io handle to a string in memory
+Io *mopen_string(const char *string);
 
+// Operations needed by the lexer
 int mgetc(Io *io);
-
 int mpeek(Io *io);
-
 _Bool mnext(Io *io, int want);
-
 _Bool mnextstr(Io *io, const char *want);
+
+// Close an Io handle
+void mclose(Io *io);
 
 #endif

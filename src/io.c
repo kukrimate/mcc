@@ -3,7 +3,47 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "io.h"
+
+typedef enum {
+    IO_FILE,
+    IO_STR,
+} IoType;
+
+struct Io {
+    IoType type;
+    union {
+        // IO_FILE
+        FILE *fp;
+        // IO_STR
+        const char *str;
+    };
+};
+
+Io *mopen(const char *path)
+{
+    FILE *fp;
+    Io *io;
+
+    if (!(fp = fopen(path, "r")))
+        return NULL;
+
+    io = malloc(sizeof *io);
+    io->type = IO_FILE;
+    io->fp = fp;
+    return io;
+}
+
+Io *mopen_string(const char *string)
+{
+    Io *io;
+
+    io = malloc(sizeof *io);
+    io->type = IO_STR;
+    io->str = string;
+    return io;
+}
 
 static int io_getc(Io *io)
 {
@@ -127,4 +167,11 @@ _Bool mnextstr(Io *io, const char *want)
     }
 
     return 1;
+}
+
+void mclose(Io *io)
+{
+    if (io->type == IO_FILE)
+        fclose(io->fp);
+    free(io);
 }

@@ -7,14 +7,12 @@ test "this is a string"
 = *= /= %= += -= <<= >>= &= ^= |=
 , # ##
 
-// #define X X Y
-// #define Y X
-// #define GLUE(x, y) x  y
-
-// GLUE(X X, 5)
-
-
-#define X Y
+// previous expansion bug source
+#define X X Y
 #define Y X
+#define GLUE(x, y) x  y
+GLUE(X X, 5)
 
-X
+// gcc "troublesome" example
+#define foo(x) bar x
+foo(foo) (2)

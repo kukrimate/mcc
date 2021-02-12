@@ -13,7 +13,6 @@
 #include "token.h"
 #include "lex.h"
 #include "pp.h"
-#include "macro.h"
 
 // Vector of token lists
 VEC_GEN(VECtoken, 2token)
@@ -94,8 +93,7 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
 
         // Basic token from the replacement list becomes part of the result
         if (replace->type == R_TOKEN) {
-            token tmp = replace->token;
-            VECtoken_add(result, tmp);
+            VECtoken_add(result, replace->token);
             continue;
         }
 
@@ -110,7 +108,7 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
             // The current macro can expand again during actual pre-expansion
             // Push current parameter's actuals to a new frame stack
             VECframe_init(&actual_stack);
-            frame_push_list(&actual_stack, actuals->arr[replace->index]);
+            frame_push_list(&actual_stack, NULL, actuals->arr[replace->index]);
             // Macro expand the actuals
             for (;;) {
                 token tmp = next_token_expand(&actual_stack, macro_database);
@@ -193,6 +191,12 @@ recurse:
     if (!macro)
         return tmp;
 
+    // If macro is disabled here, this can *never* expand again
+    if (!macro->enabled) {
+        tmp.no_expand = 1;
+        return tmp;
+    }
+
     // We need to capture the catuals if the macro is function like
     if (macro->function_like) {
         // Eat newline
@@ -213,7 +217,7 @@ recurse:
     }
 
     // Push result after a successful expansion
-    frame_push_list(frame_stack, result);
+    frame_push_list(frame_stack, macro, result);
     // Continue recursively expanding
     goto recurse;
 }
@@ -234,7 +238,7 @@ void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
     // Put macro name into database and get pointer to struct
     macro = MAPmacro_put(macro_database, identifier.data);
     VECreplace_init(&macro->replacement_list);
-    macro->disabled = 0;
+    macro->enabled = 1;
 
     tmp = frame_next(frame_stack);
     if (tmp.type == TK_LEFT_PAREN) {

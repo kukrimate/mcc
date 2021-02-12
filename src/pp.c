@@ -13,7 +13,6 @@
 #include "token.h"
 #include "lex.h"
 #include "pp.h"
-#include "macro.h"
 
 void pp_err(void)
 {
@@ -30,12 +29,17 @@ void frame_push_file(VECframe *frame_stack, Io *io)
     lex_init(&frame->ctx, io);
 }
 
-void frame_push_list(VECframe *frame_stack, VECtoken tokens)
+void frame_push_list(VECframe *frame_stack, macro *source, VECtoken tokens)
 {
     frame *frame;
 
+    // disable source macro
+    if (source)
+        source->enabled = 0;
+
     frame = VECframe_push(frame_stack);
     frame->type      = F_LIST;
+    frame->source    = source;
     frame->tokens    = tokens;
     frame->token_idx = 0;
 }
@@ -64,6 +68,8 @@ recurse:
     case F_LIST:
         // Remove frame on the end of the token list
         if (frame->token_idx == frame->tokens.n) {
+            if (frame->source)
+                frame->source->enabled = 1;
             --frame_stack->n;
             goto recurse;
         }
@@ -99,6 +105,8 @@ recurse:
     case F_LIST:
         // Remove frame on the end of the token list
         if (frame->token_idx == frame->tokens.n) {
+            if (frame->source)
+                frame->source->enabled = 1;
             --frame_stack->n;
             goto recurse;
         }
@@ -169,25 +177,19 @@ static void preprocess(Io *io)
 int
 main(int argc, char *argv[])
 {
-    char *path;
-    FILE *fp;
-    Io io;
+    Io *io;
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s FILE\n", argv[0]);
         return 1;
     }
 
-    path = argv[1];
-    if (!(fp = fopen(path, "r"))) {
-        perror(path);
+    if (!(io = mopen(argv[1]))) {
+        perror(argv[1]);
         return 1;
     }
 
-    io.type = IO_FILE;
-    io.fp = fp;
-    preprocess(&io);
-
-    fclose(fp);
+    preprocess(io);
+    mclose(io);
     return 0;
 }

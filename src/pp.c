@@ -184,12 +184,12 @@ main(int argc, char *argv[])
         return 1;
     }
 
-    if (!(io = mopen(argv[1]))) {
+    if (!(io = io_open(argv[1]))) {
         perror(argv[1]);
         return 1;
     }
 
     preprocess(io);
-    mclose(io);
+    io_close(io);
     return 0;
 }

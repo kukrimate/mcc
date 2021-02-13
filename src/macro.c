@@ -138,38 +138,36 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
             break;
         }
     }
+
+//     // Do glue
+//     for (size_t i = 0; i < result->n; ++i) {
+//         token *t = result->arr + i;
+//         if (t->type != TK_HASH_HASH) // non-interesting
+//             continue;
+
+//         token *left  = result->arr + i - 1;
+//         token *right = result->arr + i + 1;
+
+//         // create string from two tokens
+//         VECc new_str;
+//         VECc_init(&new_str);
+//         stringify_token(0, left, &new_str);
+//         stringify_token(0, right, &new_str);
+//         VECc_add(&new_str, 0);
+
+//         // add new token
+//         LexCtx lex;
+//         lex_init(&lex, mopen_string(new_str.arr));
+//         size_t oldwhite = left->lwhite;
+//         lex_next(&lex, left);
+//         left->lwhite = oldwhite;
+
+//         // pop unneeded tokens
+// endglue:
+//         VECtoken_pop(result, i);
+//         VECtoken_pop(result, i);
+//     }
 }
-
-// Do glue
-// for (size_t i = 0; i < result->n; ++i) {
-//     token *t = result->arr + i;
-//     if (t->type != TK_HASH_HASH) // non-interesting
-//         continue;
-
-//     token *left  = result->arr + i - 1;
-//     token *right = result->arr + i + 1;
-
-//     // create string from two tokens
-//     VECc new_str;
-//     VECc_init(&new_str);
-//     stringify_token(0, left, &new_str);
-//     stringify_token(0, right, &new_str);
-//     VECc_add(&new_str, 0);
-
-//     // add new token
-//     Io strio;
-//     strio.type = IO_STR;
-//     strio.str = new_str.arr;
-//     LexCtx lex;
-//     lex_init(&lex, &strio);
-//     size_t oldwhite = left->lwhite;
-//     lex_next(&lex, left);
-//     left->lwhite = oldwhite;
-
-//     // pop unneeded tokens
-//     VECtoken_pop(result, i);
-//     VECtoken_pop(result, i);
-// }
 
 token next_token_expand(VECframe *frame_stack, MAPmacro *macro_database)
 {

@@ -132,34 +132,22 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
         }
     }
 
-//     // Do glue
-//     for (size_t i = 0; i < result->n; ++i) {
-//         token *t = result->arr + i;
-//         if (t->type != TK_HASH_HASH) // non-interesting
-//             continue;
+    // Do glue
+    for (size_t i = 0; i < result->n; ++i) {
+        token *t = result->arr + i;
+        if (t->type != TK_HASH_HASH) // non-interesting
+            continue;
 
-//         token *left  = result->arr + i - 1;
-//         token *right = result->arr + i + 1;
+        token *left  = result->arr + i - 1;
+        token *right = result->arr + i + 1;
 
-//         // create string from two tokens
-//         VECc new_str;
-//         VECc_init(&new_str);
-//         stringify_token(0, left, &new_str);
-//         stringify_token(0, right, &new_str);
-//         VECc_add(&new_str, 0);
+        // Glue two tokens as left
+        *left = glue(left, right);
 
-//         // add new token
-//         LexCtx lex;
-//         lex_init(&lex, mopen_string(new_str.arr));
-//         size_t oldwhite = left->lwhite;
-//         lex_next(&lex, left);
-//         left->lwhite = oldwhite;
-
-//         // pop unneeded tokens
-// endglue:
-//         VECtoken_pop(result, i);
-//         VECtoken_pop(result, i);
-//     }
+        // Pop unneeded tokens
+        VECtoken_pop(result, i);
+        VECtoken_pop(result, i);
+    }
 }
 
 token next_token_expand(VECframe *frame_stack, MAPmacro *macro_database)
@@ -172,6 +160,10 @@ token next_token_expand(VECframe *frame_stack, MAPmacro *macro_database)
 recurse:
     // Read token from the frame stack
     tmp = frame_next(frame_stack);
+
+    // Ignore placemarkers here
+    if (tmp.type == TK_PLACEMARKER)
+        goto recurse;
 
     // Return token if no macro expansion is required
     if (tmp.type != TK_IDENTIFIER || tmp.no_expand)

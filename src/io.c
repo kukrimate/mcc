@@ -72,6 +72,10 @@ int io_getc(Io *io)
 
 static void io_ungetc(int ch, Io *io)
 {
+    // Ungetting EOF is pointless
+    if (ch == EOF)
+        return;
+
     switch (io->type) {
     case IO_STR:
         // Make sure this is used correctly

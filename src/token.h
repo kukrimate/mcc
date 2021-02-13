@@ -90,4 +90,7 @@ void output_token(token *token);
 // Convert a list of tokens to a string token
 token stringize(VECtoken *tokens);
 
+// Glue to tokens together to form one
+token glue(token *left, token *right);
+
 #endif

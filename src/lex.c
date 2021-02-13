@@ -170,21 +170,21 @@ static void character(int ch, Io *io, token *token)
     for (;;) {
         ch = io_getc(io);
         switch (ch) {
-        /* Normal character */
+        // Normal character
         default:
             VECc_add(&buf, ch);
             break;
-        /* Escape sequence */
+        // Escape sequence
         case '\\':
             escseq(ch, io, &buf);
             break;
-        /* End of character constant */
+        // End of character constant
         case '\'':
             VECc_add(&buf, 0);
             token->type = TK_CHAR_CONST;
             token->data = buf.arr;
             return;
-        /* Invalid character constant */
+        // Invalid character constant
         case EOF:
         case '\n':
             lex_err();
@@ -201,21 +201,21 @@ static void string(int ch, Io *io, token *token)
     for (;;) {
         ch = io_getc(io);
         switch (ch) {
-        /* Normal character */
+        // Normal character
         default:
             VECc_add(&buf, ch);
             break;
-        /* Escape sequence */
+        // Escape sequence
         case '\\':
             escseq(ch, io, &buf);
             break;
-        /* End of string */
+        // End of string
         case '\"':
             VECc_add(&buf, 0);
             token->type = TK_STRING_LIT;
             token->data = buf.arr;
             return;
-        /* Invalid string */
+        // Invalid string
         case EOF:
         case '\n':
             lex_err();

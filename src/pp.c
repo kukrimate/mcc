@@ -25,8 +25,9 @@ void frame_push_file(VECframe *frame_stack, Io *io)
     frame *frame;
 
     frame = VECframe_push(frame_stack);
-    frame->type = F_LEXER;
-    lex_init(&frame->ctx, io);
+    frame->type       = F_LEXER;
+    frame->io         = io;
+    frame->last_valid = 0;
 }
 
 void frame_push_list(VECframe *frame_stack, macro *source, VECtoken tokens)
@@ -56,9 +57,13 @@ recurse:
 
     switch (frame->type) {
     case F_LEXER:
+        // Return saved token
+        if (frame->last_valid) {
+            frame->last_valid = 0;
+            return frame->last;
+        }
         // Read token directly from lexer
-        ;token tmp;
-        lex_next(&frame->ctx, &tmp);
+        token tmp = lex_next(frame->io);
         // Remove frame on end of file
         if (tmp.type == TK_END_FILE) {
             --frame_stack->n;
@@ -93,15 +98,16 @@ recurse:
 
     switch (frame->type) {
     case F_LEXER:
-        // Read token directly from lexer
-        ;token tmp;
-        lex_peek(&frame->ctx, &tmp);
+        if (frame->last_valid)
+            return frame->last;
+        frame->last_valid = 1;
+        frame->last = lex_next(frame->io);
         // Remove frame on end of file
-        if (tmp.type == TK_END_FILE) {
+        if (frame->last.type == TK_END_FILE) {
             --frame_stack->n;
             goto recurse;
         }
-        return tmp;
+        return frame->last;
     case F_LIST:
         // Remove frame on the end of the token list
         if (frame->token_idx == frame->tokens.n) {
@@ -122,8 +128,8 @@ static void preprocess(Io *io)
 {
     VECframe frame_stack;
     MAPmacro macro_database;
-    _Bool     recognize_directive;
-    token     token;
+    _Bool    first;
+    token    token;
 
     // Initialize frame stack
     VECframe_init(&frame_stack);
@@ -133,21 +139,17 @@ static void preprocess(Io *io)
     MAPmacro_init(&macro_database);
 
     // Enable directive recognition at the start
-    recognize_directive = 1;
+    first = 1;
 
-    for (;;) {
+    for (;; first = 0) {
         token = next_token_expand(&frame_stack, &macro_database);
         switch (token.type) {
         case TK_END_FILE:
             // Exit loop on end of file
             return;
-        case TK_END_LINE:
-            // Newline enables directive recognition
-            recognize_directive = 1;
-            break;
         case TK_HASH:
             // Check if we need to recognize a directive
-            if (recognize_directive) {
+            if (first || token.lnew) {
                 // Directive name must be an identifier
                 token = frame_next(&frame_stack);
                 if (token.type != TK_IDENTIFIER)
@@ -159,12 +161,11 @@ static void preprocess(Io *io)
                     dir_undef(&frame_stack, &macro_database);
                 else
                     pp_err();
-                // Swallow hash token
+
+                // Don't output anything after processing directive
                 continue;
             }
-            // FALLTHROUGH
         default:
-            recognize_directive = 0;
             break;
         }
 

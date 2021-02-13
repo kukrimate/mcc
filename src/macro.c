@@ -40,7 +40,6 @@ static void capture_actuals(VECframe *frame_stack, macro *macro, VEC2token *actu
         tmp = frame_next(frame_stack);
         switch (tmp.type) {
         case TK_END_FILE:
-        case TK_END_LINE:
             // Unexpected end of parameters
             pp_err();
             break;
@@ -75,11 +74,11 @@ static void capture_actuals(VECframe *frame_stack, macro *macro, VEC2token *actu
 
     // Add arguments for last paremeter,
     // avoid adding empty parameter to 0 parameter macro
-    if (macro->num_params || actual.n)
+    if (macro->formals.n || actual.n)
         VEC2token_add(actuals, actual);
 
     // Make sure the macro has the correct number of parameters
-    if (macro->num_params != actuals->n)
+    if (macro->formals.n != actuals->n)
         pp_err();
 }
 
@@ -87,6 +86,7 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
                          VEC2token *actuals, VECtoken *result)
 {
     VECframe actual_stack;
+    _Bool    first;
 
     for (size_t i = 0; i < macro->replacement_list.n; ++i) {
         replace *replace = macro->replacement_list.arr + i;
@@ -102,39 +102,32 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
 
         // Now we will need to deal with the actuals in some ways
         switch (replace->type) {
-        case R_TOKEN: // NOTE: not possible as we checked for it above
-            abort();
         case R_PARAM_EXP:
             // The current macro can expand again during actual pre-expansion
             // Push current parameter's actuals to a new frame stack
             VECframe_init(&actual_stack);
             frame_push_list(&actual_stack, NULL, actuals->arr[replace->index]);
             // Macro expand the actuals
-            for (;;) {
+            for (first = 1;; first = 0) {
                 token tmp = next_token_expand(&actual_stack, macro_database);
                 if (tmp.type == TK_END_FILE)
                     break;
+                if (first)
+                    tmp.lwhite = replace->lwhite;
                 VECtoken_add(result, tmp);
             }
             break;
         case R_PARAM_STR:
-            // Create string of all tokens
-            ;VECc new_str;
-            VECc_init(&new_str);
-            for (size_t i = 0; i < actual->n; ++i)
-                stringify_token(1, actual->arr + i, &new_str);
-            VECc_add(&new_str, 0);
-            // Add string as a new token
-            token *new_token = VECtoken_push(result);
-            new_token->lwhite = 0;
-            new_token->type = TK_STRING_LIT;
-            new_token->data = new_str.arr;
+            // Add stringized tokens
+            VECtoken_add(result, stringize(actual));
             break;
         case R_PARAM_GLU:
             VECtoken_addall(result, actual->arr, actual->n);
             // We need to add a placemarker
             if (!actual->n)
                 VECtoken_add(result, (token) { .type = TK_PLACEMARKER });
+            break;
+        default:
             break;
         }
     }
@@ -197,9 +190,6 @@ recurse:
 
     // We need to capture the catuals if the macro is function like
     if (macro->function_like) {
-        // Eat newline
-        while (frame_peek(frame_stack).type == TK_END_LINE)
-            frame_next(frame_stack);
         // If there are no actuals provided, we don't expand
         if (frame_peek(frame_stack).type != TK_LEFT_PAREN)
             return tmp;
@@ -214,6 +204,12 @@ recurse:
         expand_macro(macro_database, macro, NULL, &result);
     }
 
+    // First resulting token gets the macro identifier's spacing
+    if (result.n) {
+        result.arr[0].lwhite = tmp.lwhite;
+        result.arr[0].lnew = tmp.lnew;
+    }
+
     // Push result after a successful expansion
     frame_push_list(frame_stack, macro, result);
     // Continue recursively expanding
@@ -222,27 +218,29 @@ recurse:
 
 void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
 {
-    macro *macro;
-    token identifier, tmp;
+    macro    *macro;
+    token    tmp;
     MAPindex param_to_idx;
-    _Bool stringify;
-    _Bool glue;
+    _Bool    stringify;
+    _Bool    glue;
 
     // Macro name must be an identifier
-    identifier = frame_next(frame_stack);
-    if (identifier.type != TK_IDENTIFIER)
+    tmp = frame_next(frame_stack);
+    if (tmp.type != TK_IDENTIFIER)
         pp_err();
 
     // Put macro name into database and get pointer to struct
-    macro = MAPmacro_put(macro_database, identifier.data);
+    macro = MAPmacro_put(macro_database, tmp.data);
     VECreplace_init(&macro->replacement_list);
     macro->enabled = 1;
 
-    tmp = frame_next(frame_stack);
-    if (tmp.type == TK_LEFT_PAREN) {
+    if (frame_peek(frame_stack).type == TK_LEFT_PAREN) {
+        // Pop lparen
+        frame_next(frame_stack);
+
         // Function like macro
         macro->function_like = 1;
-        macro->num_params    = 0;
+        VECtoken_init(&macro->formals);
 
         // Need index map to parse function like replacement list
         MAPindex_init(&param_to_idx);
@@ -252,10 +250,10 @@ void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
             tmp = frame_next(frame_stack);
             switch (tmp.type) {
             case TK_IDENTIFIER:
+                // Save formal a parameter
+                VECtoken_add(&macro->formals, tmp);
                 // Save index of parameter name
                 *MAPindex_put(&param_to_idx, tmp.data) = idx;
-                // Increase parameter count
-                ++macro->num_params;
                 // Paramter name must be followed either by a , or )
                 tmp = frame_next(frame_stack);
                 if (tmp.type == TK_RIGHT_PAREN)
@@ -275,11 +273,13 @@ void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
         stringify = 0;
         glue = 0;
         for (;;) {
+            // Newline means end of replacement list
+            if (frame_peek(frame_stack).lnew)
+                goto break_loop2;
             tmp = frame_next(frame_stack);
             switch (tmp.type) {
             case TK_END_FILE:
-            case TK_END_LINE:
-                 // End line or end file means end of macro
+                 // End file means end of macro
                 goto break_loop2;
             case TK_HASH:
                 stringify = 1;
@@ -306,6 +306,7 @@ void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
                 if (tmp.type == TK_IDENTIFIER &&
                         (param_idx = MAPindex_get(&param_to_idx, tmp.data))) {
                     r2->type  = stringify ? R_PARAM_STR : (glue ? R_PARAM_GLU : R_PARAM_EXP);
+                    r2->lwhite = tmp.lwhite;
                     r2->index = *param_idx;
                 } else {
                     r2->type = R_TOKEN;
@@ -327,10 +328,13 @@ void dir_define(VECframe *frame_stack, MAPmacro *macro_database)
         // Object-like macro
         macro->function_like = 0;
 
-        for (;; tmp = frame_next(frame_stack)) {
+        for (;;) {
+            // Newline ends replacement list
+            if (frame_peek(frame_stack).lnew)
+                goto break_loop3;
+            tmp = frame_next(frame_stack);
             switch (tmp.type) {
             case TK_END_FILE:
-            case TK_END_LINE:
                 // End line or end file means end of macro
                 goto break_loop3;
             default:;

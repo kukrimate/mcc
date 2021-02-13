@@ -4,7 +4,6 @@
 typedef enum {
     /* Terminators */
     TK_END_FILE     = 0,
-    TK_END_LINE     = 1,
 
     /* Identifiers */
     TK_HEADER_NAME  = 2,
@@ -70,14 +69,16 @@ typedef enum {
 } token_type;
 
 typedef struct {
+    // Is there whitespace to the left?
+    _Bool lwhite;
+    // Is there a newline to the left?
+    _Bool lnew;
+    // Expansion disabled
+    _Bool no_expand;
     // Type of the token
     token_type type;
-    // Number of whitespaces to the left
-    size_t lwhite;
     // Original string (for identifiers/constants)
-    const char *data;
-    // Expansion disabled (preprocessor cruft that probably shouldnt be here)
-    _Bool no_expand;
+    char *data;
 } token;
 
 // Vector of tokens
@@ -86,10 +87,7 @@ VEC_GEN(token, token);
 // Output a token to the screen
 void output_token(token *token);
 
-// Character vector for stringify
-VEC_GEN(char, c)
-
-// Stringify token adding the result to a vector
-void stringify_token(_Bool add_white, token *token, VECc *out);
+// Convert a list of tokens to a string token
+token stringize(VECtoken *tokens);
 
 #endif

@@ -8,8 +8,10 @@
 #include <vec.h>
 #include "token.h"
 
+VEC_GEN(char, c)
+
 // Punctuator to string table
-static const char *punctuator_str[] = {
+static char *punctuator_str[] = {
     [TK_LEFT_SQUARE  ] = "[",
     [TK_RIGHT_SQUARE ] = "]",
     [TK_LEFT_PAREN   ] = "(",
@@ -63,13 +65,12 @@ static const char *punctuator_str[] = {
 
 void output_token(token *token)
 {
-    for (size_t i = 0; i < token->lwhite; ++i)
+    if (token->lwhite)
         putchar(' ');
+    else if (token->lnew)
+        putchar('\n');
 
     switch (token->type) {
-    case TK_END_LINE:
-        putchar('\n');
-        break;
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
         printf("%s", token->data);
@@ -85,30 +86,54 @@ void output_token(token *token)
     }
 }
 
-void stringify_token(_Bool add_white, token *token, VECc *out)
+token stringize(VECtoken *tokens)
 {
-    char buffer[4096];
+    VECc buf;
+    size_t i;
+    token *cur, result;
 
-    if (out->n && add_white)
-        for (size_t i = 0; i < token->lwhite; ++i)
-            VECc_add(out, ' ');
+    // Initialize buffer
+    VECc_init(&buf);
 
-    switch (token->type) {
-    case TK_END_LINE: // Ignore, not an actual token per C standard
-        return;
-    case TK_IDENTIFIER:
-    case TK_PP_NUMBER:
-        snprintf(buffer, sizeof buffer, "%s", token->data);
-        break;
-    case TK_CHAR_CONST:
-        snprintf(buffer, sizeof buffer, "\'%s\'", token->data);
-        break;
-    case TK_STRING_LIT:
-        snprintf(buffer, sizeof buffer, "\"%s\"", token->data);
-        break;
-    default:
-        snprintf(buffer, sizeof buffer, "%s", punctuator_str[token->type]);
+    // Stringize tokens one-by-one
+    for (i = 0; i < tokens->n; ++i) {
+        cur = tokens->arr + i;
+
+        if (cur->lwhite)
+            VECc_add(&buf, ' ');
+        else if (cur->lnew)
+            VECc_add(&buf, '\n');
+
+        switch (cur->type) {
+        case TK_IDENTIFIER:
+        case TK_PP_NUMBER:
+            VECc_addall(&buf, cur->data, strlen(cur->data));
+            break;
+        case TK_CHAR_CONST:
+            VECc_add(&buf, '\'');
+            VECc_addall(&buf, cur->data, strlen(cur->data));
+            VECc_add(&buf, '\'');
+            break;
+        case TK_STRING_LIT:
+            VECc_add(&buf, '\"');
+            VECc_addall(&buf, cur->data, strlen(cur->data));
+            VECc_add(&buf, '\"');
+            break;
+        default:
+            VECc_addall(&buf, punctuator_str[cur->type],
+                        strlen(punctuator_str[cur->type]));
+            break;
+        }
     }
 
-    VECc_addall(out, buffer, strlen(buffer));
+    // Add NUL-terminator
+    VECc_add(&buf, 0);
+
+    // Create string literal token
+    result.lwhite = 0;
+    result.lnew = 0;
+    result.no_expand = 0;
+    result.type = TK_STRING_LIT;
+    result.data = buf.arr;
+    return result;
 }

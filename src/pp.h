@@ -17,6 +17,7 @@ typedef struct {
         };
         // R_PARAM, R_PARAM_STR
         struct {
+            _Bool  lwhite; // Inherit spacing of replacement list
             size_t index; // Index of the parameter
         };
     };
@@ -29,8 +30,8 @@ typedef struct {
     _Bool      enabled;
     // Is this a function like macro?
     _Bool      function_like;
-    // Number of parameters (if function like)
-    size_t     num_params;
+    // Formal parameters
+    VECtoken   formals;
     // Replacement list
     VECreplace replacement_list;
 } macro;
@@ -45,7 +46,9 @@ typedef struct {
     union {
         // F_LEXER
         struct {
-            LexCtx ctx;
+            Io *  io;
+            _Bool last_valid;
+            token last;
         };
         // F_LIST
         struct {

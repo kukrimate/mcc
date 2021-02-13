@@ -85,14 +85,37 @@ static void capture_actuals(VECframe *frame_stack, macro *macro, VEC2token *actu
 static void expand_macro(MAPmacro *macro_database, macro *macro,
                          VEC2token *actuals, VECtoken *result)
 {
+    // Nested frame stack for pre-expansion
     VECframe actual_stack;
+    // Stringize temp
+    token    tmp;
+    // For gluing
+    token    left;
+    _Bool    do_glue;
+    // Spacing calculation
     _Bool    first;
 
+    do_glue = 0;
     for (size_t i = 0; i < macro->replacement_list.n; ++i) {
         replace *replace = macro->replacement_list.arr + i;
 
         // Basic token from the replacement list becomes part of the result
         if (replace->type == R_TOKEN) {
+            // Save left token of glue
+            if (replace->token.type == TK_HASH_HASH) {
+                left = VECtoken_pop(result, result->n - 1);
+                do_glue = 1;
+                continue;
+            }
+
+            // Check if we need to glue token
+            if (do_glue) {
+                VECtoken_add(result, glue(&left, &replace->token));
+                do_glue = 0;
+                continue;
+            }
+
+            // Just add token
             VECtoken_add(result, replace->token);
             continue;
         }
@@ -118,35 +141,31 @@ static void expand_macro(MAPmacro *macro_database, macro *macro,
             }
             break;
         case R_PARAM_STR:
-            // Add stringized tokens
-            VECtoken_add(result, stringize(actual));
+            tmp = stringize(actual);
+            // Check if we need to glue stringize result
+            if (do_glue) {
+                VECtoken_add(result, glue(&left, &tmp));
+            } else {
+                VECtoken_add(result, tmp);
+            }
             break;
         case R_PARAM_GLU:
-            VECtoken_addall(result, actual->arr, actual->n);
-            // We need to add a placemarker
+            // Add placemarker if actual is empty
             if (!actual->n)
-                VECtoken_add(result, (token) { .type = TK_PLACEMARKER });
+                VECtoken_add(actual, (token) { .type = TK_PLACEMARKER });
+
+            // Glue if needed
+            if (do_glue) {
+                tmp = VECtoken_pop(actual, 0);
+                VECtoken_add(result, glue(&left, &tmp));
+            }
+
+            // Add the rest of the actual
+            VECtoken_addall(result, actual->arr, actual->n);
             break;
         default:
             break;
         }
-    }
-
-    // Do glue
-    for (size_t i = 0; i < result->n; ++i) {
-        token *t = result->arr + i;
-        if (t->type != TK_HASH_HASH) // non-interesting
-            continue;
-
-        token *left  = result->arr + i - 1;
-        token *right = result->arr + i + 1;
-
-        // Glue two tokens as left
-        *left = glue(left, right);
-
-        // Pop unneeded tokens
-        VECtoken_pop(result, i);
-        VECtoken_pop(result, i);
     }
 }
 

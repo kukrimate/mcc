@@ -12,7 +12,24 @@
 
 VEC_GEN(char, c)
 
-// Punctuator to string table
+Token *create_token(TokenType type, char *data)
+{
+    Token *token;
+
+    token = calloc(1, sizeof *token);
+    token->type = type;
+    token->data = data;
+    return token;
+}
+
+void free_token(Token *token)
+{
+    if (token->data)
+        free(token->data);
+    free(token);
+}
+
+// Punctuator to string conversion table
 static char *punctuator_str[] = {
     [TK_LEFT_SQUARE  ] = "[",
     [TK_RIGHT_SQUARE ] = "]",
@@ -65,7 +82,7 @@ static char *punctuator_str[] = {
     [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
-static void token_to_str(token *token, VECc *buf)
+static void token_to_str(Token *token, VECc *buf)
 {
     char *str;
 
@@ -96,7 +113,7 @@ static void token_to_str(token *token, VECc *buf)
     }
 }
 
-void output_token(token *token)
+void output_token(Token *token)
 {
     VECc buf;
 
@@ -111,51 +128,40 @@ void output_token(token *token)
     VECc_free(&buf);
 }
 
-token stringize(VECtoken *tokens)
+Token *stringize(VECToken *token_list)
 {
     VECc   buf;
     size_t i;
-    token  result;
 
     // Initialize buffer
     VECc_init(&buf);
-
     // Stringize tokens one-by-one
-    for (i = 0; i < tokens->n; ++i)
-        token_to_str(tokens->arr + i, &buf);
-
+    for (i = 0; i < token_list->n; ++i)
+        token_to_str(token_list->arr + i, &buf);
     // Add NUL-terminator
     VECc_add(&buf, 0);
 
     // Create string literal token
-    result.lwhite = 0;
-    result.lnew = 0;
-    result.no_expand = 0;
-    result.type = TK_STRING_LIT;
-    result.data = buf.arr;
-    return result;
+    return create_token(TK_STRING_LIT, buf.arr);
 }
 
-void pp_err(void);
-
-token glue(token *left, token *right)
+Token *glue(Token *left, Token *right)
 {
     VECc  buf;
     Io    *io;
-    token tmp;
-    _Bool fail;
+    Token *result;
 
     // Placemarker handling
     if (left->type == TK_PLACEMARKER) {
         // Two placemarkers just become one
         if (right->type == TK_PLACEMARKER)
-            return *left;
+            return left;
         // If left is a placemarker return right
-        return *right;
+        return right;
     }
     // If right is a placemarker return left
     if (right->type == TK_PLACEMARKER)
-        return *left;
+        return left;
 
     // Initialize buffer
     VECc_init(&buf);
@@ -166,17 +172,14 @@ token glue(token *left, token *right)
     VECc_add(&buf, 0);
 
     // Lex new buffer
-    fail = 0;
     io = io_open_string(buf.arr);
-    tmp = lex_next(io);
-    if (lex_next(io).type != TK_END_FILE)
-        fail = 1;
+    result = lex_next(io);
+    // If there are more tokens, it means glue failed
+    if (lex_next(io))
+        lex_err();
     io_close(io);
     VECc_free(&buf);
 
-    // Check if we failed
-    if (fail)
-        pp_err();
-
-    return tmp;
+    return result;
 }
+

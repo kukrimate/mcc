@@ -12,13 +12,13 @@
 
 VEC_GEN(char, c)
 
-static void lex_err(void)
+void lex_err(void)
 {
     fprintf(stderr, "Invalid token!\n");
     exit(1);
 }
 
-static void identifier(int ch, Io *io, token *token)
+static void identifier(int ch, Io *io, Token *token)
 {
     VECc buf;
 
@@ -41,7 +41,7 @@ static void identifier(int ch, Io *io, token *token)
         }
 }
 
-static void pp_num(int ch, Io *io, token *token)
+static void pp_num(int ch, Io *io, Token *token)
 {
     VECc buf;
 
@@ -161,7 +161,7 @@ static void escseq(int ch, Io *io, VECc *v)
     }
 }
 
-static void character(int ch, Io *io, token *token)
+static void character(int ch, Io *io, Token *token)
 {
     VECc buf;
 
@@ -192,7 +192,7 @@ static void character(int ch, Io *io, token *token)
     }
 }
 
-static void string(int ch, Io *io, token *token)
+static void string(int ch, Io *io, Token *token)
 {
     VECc buf;
 
@@ -236,14 +236,12 @@ static _Bool next_nl(Io *io)
     return 0;
 }
 
-token lex_next(Io *io)
+Token *lex_next(Io *io)
 {
-    token token;
+    Token *token;
     int ch;
 
-    token.lwhite = 0;
-    token.lnew = 0;
-    token.no_expand = 0;
+    token = create_token(0, NULL);
 
     retry:
     switch ((ch = io_getc(io))) {
@@ -252,18 +250,18 @@ token lex_next(Io *io)
     case '\v':
     case '\t':
     case ' ':
-        token.lwhite = 1;
+        token->lwhite = 1;
         goto retry;
     // End of file
     case EOF:
-        token.type = TK_END_FILE;
-        return token;
+        free(token);
+        return NULL;
     // End of line
     case '\r':
         io_next(io, '\n');
         // FALLTHROUGH
     case '\n':
-        token.lnew = 1;
+        token->lnew = 1;
         goto retry;
     // Line concatanation
     case '\\':
@@ -274,105 +272,105 @@ token lex_next(Io *io)
     case '_':
     case 'a' ... 'z':
     case 'A' ... 'Z':
-        identifier(ch, io, &token);
+        identifier(ch, io, token);
         return token;
     // PP-number
     case '0' ... '9':
-        pp_num(ch, io, &token);
+        pp_num(ch, io, token);
         return token;
     // Character constant
     case '\'':
-        character(ch, io, &token);
+        character(ch, io, token);
         return token;
     // String literal
     case '\"':
-        string(ch, io, &token);
+        string(ch, io, token);
         return token;
     // Punctuators
     case '[':
-        token.type = TK_LEFT_SQUARE;
+        token->type = TK_LEFT_SQUARE;
         return token;
     case ']':
-        token.type = TK_RIGHT_SQUARE;
+        token->type = TK_RIGHT_SQUARE;
         return token;
     case '(':
-        token.type = TK_LEFT_PAREN;
+        token->type = TK_LEFT_PAREN;
         return token;
     case ')':
-        token.type = TK_RIGHT_PAREN;
+        token->type = TK_RIGHT_PAREN;
         return token;
     case '{':
-        token.type = TK_LEFT_CURLY;
+        token->type = TK_LEFT_CURLY;
         return token;
     case '}':
-        token.type = TK_RIGHT_CURLY;
+        token->type = TK_RIGHT_CURLY;
         return token;
     case '~':
-        token.type = TK_TILDE;
+        token->type = TK_TILDE;
         return token;
     case '?':
-        token.type = TK_QUEST_MARK;
+        token->type = TK_QUEST_MARK;
         return token;
     case ';':
-        token.type = TK_SEMICOLON;
+        token->type = TK_SEMICOLON;
         return token;
     case ',':
-        token.type = TK_COMMA;
+        token->type = TK_COMMA;
         return token;
     case '.':
         switch (io_peek(io)) {
         case '0' ... '9':                              // PP-num
-            pp_num(ch, io, &token);
+            pp_num(ch, io, token);
             return token;
         }
         if (io_nextstr(io, ".."))                      // ...
-            token.type = TK_VARARGS;
+            token->type = TK_VARARGS;
         else                                           // .
-            token.type = TK_MEMBER;
+            token->type = TK_MEMBER;
         return token;
     case '-':
         if (io_next(io, '>'))                          // ->
-            token.type = TK_DEREF_MEMBER;
+            token->type = TK_DEREF_MEMBER;
         else if (io_next(io, '-'))                     // --
-            token.type = TK_MINUS_MINUS;
+            token->type = TK_MINUS_MINUS;
         else if (io_next(io, '='))                     // -=
-            token.type = TK_SUB_EQUAL;
+            token->type = TK_SUB_EQUAL;
         else                                           // -
-            token.type = TK_MINUS;
+            token->type = TK_MINUS;
         return token;
     case '+':
         if (io_next(io, '+'))                          // ++
-            token.type = TK_PLUS_PLUS;
+            token->type = TK_PLUS_PLUS;
         else if (io_next(io, '='))                     // +=
-            token.type = TK_ADD_EQUAL;
+            token->type = TK_ADD_EQUAL;
         else                                           // +
-            token.type = TK_PLUS;
+            token->type = TK_PLUS;
         return token;
     case '&':
         if (io_next(io, '&'))                          // &&
-            token.type = TK_LOGIC_AND;
+            token->type = TK_LOGIC_AND;
         else if (io_next(io, '='))                     // &=
-            token.type = TK_AND_EQUAL;
+            token->type = TK_AND_EQUAL;
         else                                           // &
-            token.type = TK_AMPERSAND;
+            token->type = TK_AMPERSAND;
         return token;
     case '*':
         if (io_next(io, '='))                          // *=
-            token.type = TK_MUL_EQUAL;
+            token->type = TK_MUL_EQUAL;
         else                                           // *
-            token.type = TK_STAR;
+            token->type = TK_STAR;
         return token;
     case '!':
         if (io_next(io, '='))                          // !=
-            token.type = TK_NOT_EQUAL;
+            token->type = TK_NOT_EQUAL;
         else                                           // !
-            token.type = TK_EXCL_MARK;
+            token->type = TK_EXCL_MARK;
         return token;
     case '/':
         if (io_next(io, '/')) {                        // Line comment
             while (!next_nl(io))
                 io_getc(io);
-            token.lwhite = 1;
+            token->lwhite = 1;
             goto retry;
         } else if (io_next(io, '*')) {                 // Block comment
             for (;;) {
@@ -380,90 +378,90 @@ token lex_next(Io *io)
                 if (ch == EOF)
                     lex_err();
                 if (ch == '*' && io_next(io, '/')) {
-                    token.lwhite = 1;
+                    token->lwhite = 1;
                     goto retry;
                 }
             }
         }
 
         if (io_next(io, '='))                          // /=
-            token.type = TK_DIV_EQUAL;
+            token->type = TK_DIV_EQUAL;
         else                                           // /
-            token.type = TK_FWD_SLASH;
+            token->type = TK_FWD_SLASH;
         return token;
     case '%':
         if (io_next(io, '=')) {                        // %=
-            token.type = TK_REM_EQUAL;
+            token->type = TK_REM_EQUAL;
         } else if (io_next(io, '>')) {                 // %>
-            token.type = TK_RIGHT_CURLY;
+            token->type = TK_RIGHT_CURLY;
         } else if (io_next(io, ':')) {
             if (io_nextstr(io, "%:"))                  // %:%:
-                token.type = TK_HASH_HASH;
+                token->type = TK_HASH_HASH;
             else                                       // %:
-                token.type = TK_HASH;
+                token->type = TK_HASH;
         } else {                                       // %
-            token.type = TK_PERCENT;
+            token->type = TK_PERCENT;
         }
         return token;
     case '<':
         if (io_next(io, '<')) {
             if (io_next(io, '='))                      // <<=
-                token.type = TK_LSHIFT_EQUAL;
+                token->type = TK_LSHIFT_EQUAL;
             else                                       // <<
-                token.type = TK_LEFT_SHIFT;
+                token->type = TK_LEFT_SHIFT;
         } else if (io_next(io, '=')) {                 // <=
-            token.type = TK_LESS_EQUAL;
+            token->type = TK_LESS_EQUAL;
         } else if (io_next(io, ':')) {                 // <:
-            token.type = TK_LEFT_SQUARE;
+            token->type = TK_LEFT_SQUARE;
         } else if (io_next(io, '%')) {                 // <%
-            token.type = TK_LEFT_CURLY;
+            token->type = TK_LEFT_CURLY;
         } else {                                       // <
-            token.type = TK_LEFT_ANGLE;
+            token->type = TK_LEFT_ANGLE;
         }
         return token;
     case '>':
         if (io_next(io, '>')) {
             if (io_next(io, '='))                      // >>=
-                token.type = TK_RSHIFT_EQUAL;
+                token->type = TK_RSHIFT_EQUAL;
             else                                       // >>
-                token.type = TK_RIGHT_SHIFT;
+                token->type = TK_RIGHT_SHIFT;
         } else if (io_next(io, '=')) {                 // >=
-            token.type = TK_MORE_EQUAL;
+            token->type = TK_MORE_EQUAL;
         } else {                                       // >
-            token.type = TK_RIGHT_ANGLE;
+            token->type = TK_RIGHT_ANGLE;
         }
         return token;
     case '=':
         if (io_next(io, '='))                          // ==
-            token.type = TK_EQUAL_EQUAL;
+            token->type = TK_EQUAL_EQUAL;
         else                                           // =
-            token.type = TK_EQUAL;
+            token->type = TK_EQUAL;
         return token;
     case '^':
         if (io_next(io, '='))                          // ^=
-            token.type = TK_XOR_EQUAL;
+            token->type = TK_XOR_EQUAL;
         else                                           // ^
-            token.type = TK_CARET;
+            token->type = TK_CARET;
         return token;
     case '|':
         if (io_next(io, '|'))                          // ||
-            token.type = TK_LOGIC_OR;
+            token->type = TK_LOGIC_OR;
         else if (io_next(io, '='))                     // |=
-            token.type = TK_OR_EQUAL;
+            token->type = TK_OR_EQUAL;
         else                                           // |
-            token.type = TK_VERTICAL_BAR;
+            token->type = TK_VERTICAL_BAR;
         return token;
     case ':':
         if (io_next(io, '>'))                          // :>
-            token.type = TK_RIGHT_SQUARE;
+            token->type = TK_RIGHT_SQUARE;
         else                                           // :
-            token.type = TK_COLON;
+            token->type = TK_COLON;
         return token;
     case '#':
         if (io_next(io, '#'))                          // ##
-            token.type = TK_HASH_HASH;
+            token->type = TK_HASH_HASH;
         else                                           // #
-            token.type = TK_HASH;
+            token->type = TK_HASH;
         return token;
     }
 

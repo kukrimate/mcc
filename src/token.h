@@ -2,17 +2,14 @@
 #define TOKEN_H
 
 typedef enum {
-    /* Terminators */
-    TK_END_FILE     = 0,
-
     /* Identifiers */
-    TK_HEADER_NAME  = 2,
-    TK_IDENTIFIER   = 3,
+    TK_HEADER_NAME  = 0,
+    TK_IDENTIFIER   = 1,
 
     /* Constants */
-    TK_PP_NUMBER    = 4,
-    TK_CHAR_CONST   = 5,
-    TK_STRING_LIT   = 6,
+    TK_PP_NUMBER    = 2,
+    TK_CHAR_CONST   = 3,
+    TK_STRING_LIT   = 4,
 
     /* Punctuators */
     TK_LEFT_SQUARE  = 0x100, /* [   */
@@ -66,31 +63,33 @@ typedef enum {
 
     /* Placemarker (used when applying the ## opeartor) */
     TK_PLACEMARKER  = 0x200,
-} token_type;
+} TokenType;
 
+// Token type
 typedef struct {
-    // Is there whitespace to the left?
-    _Bool lwhite;
-    // Is there a newline to the left?
-    _Bool lnew;
-    // Expansion disabled
-    _Bool no_expand;
-    // Type of the token
-    token_type type;
-    // Original string (for identifiers/constants)
-    char *data;
-} token;
+    _Bool lwhite;    // Whitespace to the left
+    _Bool lnew;      // Newline to the left
+    _Bool no_expand; // Token can't expand anymore
+    TokenType type;  // Type of token
+    char *data;      // Underlying string
+} Token;
 
-// Vector of tokens
-VEC_GEN(token, token);
+// List of tokens
+VEC_GEN(Token, Token)
+
+// Create a new token
+Token *create_token(TokenType type, char *data);
+
+// Free a token
+void free_token(Token *token);
 
 // Output a token to the screen
-void output_token(token *token);
+void output_token(Token *token);
 
 // Convert a list of tokens to a string token
-token stringize(VECtoken *tokens);
+Token *stringize(VECToken *token_list);
 
 // Glue to tokens together to form one
-token glue(token *left, token *right);
+Token *glue(Token *left, Token *right);
 
 #endif

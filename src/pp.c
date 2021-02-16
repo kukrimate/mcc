@@ -35,6 +35,7 @@ struct Macro {
 
     // Function-like macro-only
     size_t    param_cnt;     // Number of parameters
+    _Bool     has_varargs;   // Does this macro have varargs parameter?
     Token     *formals;      // Formal parameters
 
     Macro *next;
@@ -315,7 +316,8 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
         switch (token->type) {
         case TK_COMMA:
             // Ignore comma in nested parenthesis
-            if (paren_nest > 1)
+            if (paren_nest > 1 ||
+                    (macro->has_varargs && macro->param_cnt == actual_cnt))
                 goto add_tok;
             // Free comma
             free_token(token);
@@ -540,6 +542,7 @@ static void capture_formals(PpContext *ctx, Macro *macro)
     // Initialize token list
     tail = &macro->formals;
     macro->param_cnt = 0;
+    macro->has_varargs = 0;
 
 want_ident:
     // Free previous token
@@ -551,8 +554,15 @@ want_ident:
         pp_err("Formal parameter name missing");
     if (tmp->type == TK_RIGHT_PAREN)
         goto end;
+    // Variable argument mode
+    if (tmp->type == TK_VARARGS) {
+        free_token(tmp);
+        tmp = create_token(TK_IDENTIFIER, strdup("__VA_ARGS__"));
+        macro->has_varargs = 1;
+    }
+    // Must be an identifier
     if (tmp->type != TK_IDENTIFIER)
-        pp_err("Invalid token in formal parameter list");;
+        pp_err("Invalid token in formal parameter list");
 
     // Add name to the list
     *tail = tmp;
@@ -563,8 +573,11 @@ want_ident:
     tmp = pp_next_dir(ctx);
     if (!tmp)
         pp_err("Unexpected end of formal parameters");
-    if (tmp->type == TK_COMMA)
+    if (tmp->type == TK_COMMA) {
+        if (macro->has_varargs)
+            pp_err("Variable args must be the last formal parameter of macro");
         goto want_ident;
+    }
     if (tmp->type != TK_RIGHT_PAREN)
         pp_err("Invalid token in formal parameter list");
 end:
@@ -633,6 +646,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
                 (*tail)->type = R_PARAM_STR;
                 (*tail)->token = tmp;
                 (*tail)->param_idx = formal_idx;
+                tail = &(*tail)->next;
                 break;
             }
             // FALLTHROUGH

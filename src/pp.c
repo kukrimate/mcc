@@ -5,17 +5,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vec.h>
 #include "token.h"
 #include "io.h"
 #include "lex.h"
 #include "err.h"
 
-// NOTE: Not sure if libkm will be kept long term
-VEC_GEN(Token*, _Token)
-
 typedef enum {
-    R_GLUE,      // Glue opeartor
+    R_GLUE,      // Glue operator
     R_TOKEN,     // Replace with a token
     R_PARAM_EXP, // Replace with a parameter expanded
     R_PARAM_STR, // Replace with a parameter stringified
@@ -369,119 +365,99 @@ static Token *dup_tokens(Token *head)
     return result;
 }
 
-static Token *pp_next_expand(PpContext *ctx);
-
-static void handle_replace(PpContext *ctx, Replace *replace, Token **actuals, VEC_Token *out)
+static Token *glue_free(Token *l, Token *r)
 {
-    PpContext subctx;
-    Token     *tmp;
-    _Bool     first;
+    Token *result;
 
-    switch (replace->type) {
-    case R_GLUE:
-        // This function can't possibly get GLUE
-        // abort();
-    case R_TOKEN:
-        VEC_Token_add(out, dup_token(replace->token));
-        break;
-    case R_PARAM_EXP:
-        // We need to pre-expand the actual parameter
-        subctx.frames = NULL;
-        subctx.macros = ctx->macros;
-        pp_push_list(&subctx, NULL, dup_tokens(actuals[replace->param_idx]));
-        for (first = 1;; first = 0) {
-            // Read token from subcontext
-            tmp = pp_next_expand(&subctx);
-            if (!tmp)
-                break;
-            // Inherit spacing from replacement list
-            if (first) {
-                tmp->lwhite = replace->token->lwhite;
-                tmp->lnew = replace->token->lnew;
-            }
-            // Add token
-            VEC_Token_add(out, tmp);
-        }
-        break;
-    case R_PARAM_STR:
-        VEC_Token_add(out, stringize(actuals[replace->param_idx]));
-        break;
-    case R_PARAM_GLU:
-        if (actuals[replace->param_idx]) {
-            // Add all tokens from the actual parameter
-            for (tmp = actuals[replace->param_idx]; tmp; tmp = tmp->next)
-                VEC_Token_add(out, dup_token(tmp));
-        } else {
-            // Add placemarker if actual parameter is empty
-            VEC_Token_add(out, create_token(TK_PLACEMARKER, NULL));
-        }
-        break;
-    }
+    result = glue(l, r);
+    free_token(l);
+    free_token(r);
+    return result;
 }
+
+static Token *pp_next_expand(PpContext *ctx);
 
 static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
 {
-    VEC_Token lhs, rhs;
+    Token     *head, **tail, *tmp, *cur;
     Replace   *replace;
-    _Bool     had_glue;
+    PpContext subctx;
+    _Bool     first, do_glue;
 
-    // Create lists
-    VEC_Token_init(&lhs);
-    VEC_Token_init(&rhs);
+    head = NULL;
+    tail = &head;
 
-    // Get replacement list
-    replace = macro->replace_list;
+    do_glue = 0;
 
-    while (replace) {
-        // Eat up all glue operators
-        for (had_glue = 0;; had_glue = 1) {
-            if (!replace || replace->type != R_GLUE)
-                break;
-            replace = replace->next;
-        }
-
-        if (had_glue) {
-            // We need to do a glue
-            Token *l, *r;
-
-            // Get RHS token sequence
-            handle_replace(ctx, replace, actuals, &rhs);
-            replace = replace->next;
-
-            // Glue first token of RHS to last token of LHS
-            l = VEC_Token_pop(&lhs);
-            r = rhs.arr[0];
-            VEC_Token_add(&lhs, glue(l, r));
-            free_token(l);
-            free_token(r);
-
-            // Add rest of RHS to LHS
-            VEC_Token_addall(&lhs, rhs.arr + 1, rhs.n - 1);
-            rhs.n = 0;
-        } else {
-            // Otherwise just process the replace element
-            handle_replace(ctx, replace, actuals, &lhs);
-            replace = replace->next;
-        }
+    // This is kind of ugly, but duplicating this code
+    // woudln't make it any better
+    #define glue_tmp                   \
+    if (do_glue) {                     \
+        *tail = glue_free(*tail, tmp); \
+        do_glue = 0;                   \
+    } else {                           \
+        if (*tail)                     \
+            tail = &(*tail)->next;     \
+        *tail = tmp;                   \
     }
 
-    // Create linked-list from LHS
-    {
-        Token  *head, **tail;
-        size_t i;
+    for (replace = macro->replace_list; replace; replace = replace->next)
+        switch (replace->type) {
+        case R_GLUE:
+            do_glue = 1;
+            break;
+        case R_TOKEN:
+            tmp = dup_token(replace->token);
+            glue_tmp
+            break;
+        case R_PARAM_EXP:
+            if (do_glue) {
+                // Shouldn't be possible to reach this, but leaving it
+                // just to indicate bugs (which will exist)
+                abort();
+            }
 
-        head = NULL;
-        tail = &head;
-
-        for (i = 0; i < lhs.n; ++i) {
-            *tail = lhs.arr[i];
-            tail = &(*tail)->next;
+            // We need to pre-expand the actual parameter
+            subctx.frames = NULL;
+            subctx.macros = ctx->macros;
+            pp_push_list(&subctx, NULL, dup_tokens(actuals[replace->param_idx]));
+            for (first = 1;; first = 0) {
+                // Read token from subcontext
+                tmp = pp_next_expand(&subctx);
+                if (!tmp)
+                    break;
+                // Inherit spacing from replacement list
+                if (first) {
+                    tmp->lwhite = replace->token->lwhite;
+                    tmp->lnew = replace->token->lnew;
+                }
+                // Add token
+                if (*tail)
+                    tail = &(*tail)->next;
+                *tail = tmp;
+            }
+            break;
+        case R_PARAM_STR:
+            tmp = stringize(actuals[replace->param_idx]);
+            glue_tmp
+            break;
+        case R_PARAM_GLU:
+            if (actuals[replace->param_idx]) {
+                // Add all tokens from the actual parameter
+                for (cur = actuals[replace->param_idx]; cur; cur = cur->next) {
+                    tmp = dup_token(cur);
+                    glue_tmp
+                }
+            } else {
+                // Add placemarker if actual parameter is empty
+                tmp = create_token(TK_PLACEMARKER, NULL);
+                glue_tmp
+            }
+            break;
         }
 
-        VEC_Token_free(&lhs);
-        VEC_Token_free(&rhs);
-        return head;
-    }
+    #undef glue_tmp
+    return head;
 }
 
 Token *pp_next_expand(PpContext *ctx)

@@ -9,14 +9,9 @@
 #include "io.h"
 #include "token.h"
 #include "lex.h"
+#include "err.h"
 
 VEC_GEN(char, c)
-
-void lex_err(void)
-{
-    fprintf(stderr, "Invalid token!\n");
-    exit(1);
-}
 
 static void identifier(int ch, Io *io, Token *token)
 {
@@ -157,7 +152,7 @@ static void escseq(int ch, Io *io, VECc *v)
         break;
     default:
         // Invalid escape sequence
-        lex_err();
+        pp_err("Invalid escape sequence");
     }
 }
 
@@ -184,10 +179,10 @@ static void character(int ch, Io *io, Token *token)
             token->type = TK_CHAR_CONST;
             token->data = buf.arr;
             return;
-        // Invalid character constant
+        // Unterminated character constant
         case EOF:
         case '\n':
-            lex_err();
+            pp_err("Unterminated character constant");
         }
     }
 }
@@ -218,7 +213,7 @@ static void string(int ch, Io *io, Token *token)
         // Invalid string
         case EOF:
         case '\n':
-            lex_err();
+            pp_err("Unterminated string literal");
         }
     }
 }
@@ -376,7 +371,7 @@ Token *lex_next(Io *io)
             for (;;) {
                 ch = io_getc(io);
                 if (ch == EOF)
-                    lex_err();
+                    pp_err("Unterminated block comment");
                 if (ch == '*' && io_next(io, '/')) {
                     token->lwhite = 1;
                     goto retry;
@@ -466,6 +461,5 @@ Token *lex_next(Io *io)
     }
 
     // Couldn't lex token
-    lex_err();
-    abort();
+    pp_err("Unlexable character");
 }

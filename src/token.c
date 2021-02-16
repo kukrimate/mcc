@@ -9,6 +9,7 @@
 #include "token.h"
 #include "io.h"
 #include "lex.h"
+#include "err.h"
 
 VEC_GEN(char, c)
 
@@ -19,6 +20,16 @@ Token *create_token(TokenType type, char *data)
     token = calloc(1, sizeof *token);
     token->type = type;
     token->data = data;
+    return token;
+}
+
+Token *dup_token(Token *other)
+{
+    Token *token;
+
+    token = calloc(1, sizeof *token);
+    *token = *other;
+    token->next = NULL;
     return token;
 }
 
@@ -128,16 +139,15 @@ void output_token(Token *token)
     VECc_free(&buf);
 }
 
-Token *stringize(VECToken *token_list)
+Token *stringize(Token *tokens)
 {
     VECc   buf;
-    size_t i;
 
     // Initialize buffer
     VECc_init(&buf);
     // Stringize tokens one-by-one
-    for (i = 0; i < token_list->n; ++i)
-        token_to_str(token_list->arr + i, &buf);
+    for (; tokens; tokens = tokens->next)
+        token_to_str(tokens, &buf);
     // Add NUL-terminator
     VECc_add(&buf, 0);
 
@@ -176,7 +186,7 @@ Token *glue(Token *left, Token *right)
     result = lex_next(io);
     // If there are more tokens, it means glue failed
     if (lex_next(io))
-        lex_err();
+        pp_err("Token concatenation must result in one token");
     io_close(io);
     VECc_free(&buf);
 

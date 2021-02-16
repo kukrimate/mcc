@@ -2,49 +2,121 @@
  * Preprocessor
  */
 
-#include "pp_internal.h"
-#include "pp.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "token.h"
+#include "io.h"
+#include "lex.h"
+#include "err.h"
 
-void pp_err(char *error)
-{
-    fprintf(stderr, "Preprocessor error: %s\n", error);
-    exit(1);
-}
+typedef enum {
+    R_TOKEN,     // Replace with a token
+    R_PARAM_EXP, // Replace with a parameter expanded
+    R_PARAM_STR, // Replace with a parameter stringified
+    R_PARAM_GLU, // Replace with a parameter without expansion (or placemarker)
+} ReplaceType;
+
+typedef struct Replace Replace;
+struct Replace {
+    ReplaceType type;      // Replace type
+    Token*      token;     // Original token
+    ssize_t     param_idx; // Parameter index (for R_PARAM_*) or -1
+    Replace     *next;
+};
+
+typedef enum {
+    M_OBJECT,   // Object-like macro
+    M_FUNCTION, // Function-like macro
+} MacroType;
+
+typedef struct Macro Macro;
+struct Macro {
+    Token     *name;   // Name of this macro
+    _Bool     enabled; // Is this macro enabled?
+    MacroType type;    // Type of macro
+    union {
+        // M_OBJECT
+        struct {
+            Token    *body;       // Replacement list
+        };
+        // M_FUNCTION
+        struct {
+            size_t   param_cnt;     // Number of parameters
+            Token    *formals;      // Formal parameters
+            Replace  *replace_list; // Replacement list
+        };
+    };
+    Macro *next;
+};
+
+typedef enum {
+    F_LEXER,  // Directly from the lexer
+    F_LIST,   // List of tokens in memory
+} FrameType;
+
+typedef struct Frame Frame;
+struct Frame {
+    FrameType type;
+    union {
+        // F_LEXER
+        struct {
+            Io    *io;     // Token source
+            Token *last;   // Saved token from peaking
+        };
+        // F_LIST
+        struct {
+            Macro *source; // Originating macro
+            Token *tokens; // Head of token list
+        };
+    };
+    Frame *next;
+};
+
+// Preprocessor context
+typedef struct {
+    Frame *frames;
+    Macro *macros;
+} PpContext;
 
 static Frame *new_frame(PpContext *ctx)
 {
     Frame *frame = calloc(1, sizeof *frame);
-    frame->next = ctx->frame_list;
-    ctx->frame_list = frame;
+    frame->next = ctx->frames;
+    ctx->frames = frame;
     return frame;
 }
 
 void pp_push_file(PpContext *ctx, Io *io)
 {
-    Frame *frame = new_frame(ctx);
+    Frame *frame;
+
+    frame = new_frame(ctx);
     frame->type = F_LEXER;
     frame->io = io;
 }
 
-void pp_push_list(PpContext *ctx, Macro *source, VECToken *token_list)
+void pp_push_list(PpContext *ctx, Macro *source, Token *tokens)
 {
+    Frame *frame;
+
     // Disable source macro if present
     if (source)
         source->enabled = 0;
 
-    Frame *frame = new_frame(ctx);
+    frame = new_frame(ctx);
     frame->type = F_LIST;
     frame->source = source;
-    frame->token_list = token_list;
+    frame->tokens = tokens;
 }
 
-Token *pp_next(PpContext *ctx)
+static Token *pp_next(PpContext *ctx)
 {
     Frame *frame;
     Token *token;
 
 recurse:
-    frame = ctx->frame_list;
+    frame = ctx->frames;
     if (!frame)
         return NULL;
     switch (frame->type) {
@@ -57,36 +129,37 @@ recurse:
             token = lex_next(frame->io);
             if (!token) {
                 // Remove frame
-                ctx->frame_list = frame->next;
+                ctx->frames = frame->next;
                 goto recurse;
             }
         }
         break;
     case F_LIST:
         // Get token from the token list
-        if (!frame->token_list) {
+        if (!frame->tokens) {
             // Re-enable source macro when popping frame
             if (frame->source)
                 frame->source->enabled = 1;
             // Remove frame
-            ctx->frame_list = frame->next;
+            ctx->frames = frame->next;
             goto recurse;
         }
         // Advance token list
-        token = frame->token_list;
-        frame->token_list = frame->token_list->next;
+        token = frame->tokens;
+        frame->tokens = frame->tokens->next;
+        token->next = NULL;
         break;
     }
 
     return token;
 }
 
-Token *pp_peek(PpContext *ctx)
+static Token *pp_peek(PpContext *ctx)
 {
     Frame *frame;
     Token *token;
 
-    frame = ctx->frame_list;
+    frame = ctx->frames;
 recurse:
     if (!frame)
         return NULL;
@@ -105,7 +178,7 @@ recurse:
         token = frame->last;
         break;
     case F_LIST:
-        token = frame->token_list;
+        token = frame->tokens;
         if (!token) {
             // Peek at next frame
             frame = frame->next;
@@ -120,8 +193,8 @@ recurse:
 static Macro *new_macro(PpContext *ctx)
 {
     Macro *macro = calloc(1, sizeof *macro);
-    macro->next = ctx->macro_list;
-    ctx->macro_list = macro;
+    macro->next = ctx->macros;
+    ctx->macros = macro;
     return macro;
 }
 
@@ -129,7 +202,7 @@ static Macro *find_macro(PpContext *ctx, Token *token)
 {
     Macro *macro;
 
-    for (macro = ctx->macro_list; macro; macro = macro->next) {
+    for (macro = ctx->macros; macro; macro = macro->next) {
         if (!strcmp(macro->name->data, token->data)) {
             return macro;
         }
@@ -141,7 +214,7 @@ static void del_macro(PpContext *ctx, Token *token)
 {
     Macro **macro;
 
-    for (macro = &ctx->macro_list; *macro; macro = &(*macro)->next) {
+    for (macro = &ctx->macros; *macro; macro = &(*macro)->next) {
         // Delete macro if name matches, then return
         if (!strcmp((*macro)->name->data, token->data)) {
             *macro = (*macro)->next;
@@ -214,13 +287,27 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
         pp_err("Too few parameters for function-like macro");
 }
 
+static Token *dup_token_list(Token *head)
+{
+    Token *result, **tail;
+
+    result = NULL;
+    tail = &result;
+
+    for (; head; head = head->next) {
+        *tail = dup_token(head);
+        tail = &(*tail)->next;
+    }
+
+    return result;
+}
+
 static Token *pp_next_expand(PpContext *ctx);
 
-static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
+static Token *expand_function_macro(PpContext *ctx, Macro *macro, Token **actuals)
 {
-    Token     *expansion, **expansion_tail;
+    Token     *expansion, **expansion_tail, *token;
     Replace   *replace;
-    Token     *token;
     PpContext subctx;
     _Bool     first;
 
@@ -238,9 +325,9 @@ static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
         switch (replace->type) {
         case R_PARAM_EXP:
             // We need to pre-expand the actual paramter
-            subctx.frame_list = NULL;
-            subctx.macro_list = ctx->macro_list;
-            pp_push_list(&subctx, NULL, actuals[replace->param_idx]);
+            subctx.frames = NULL;
+            subctx.macros = ctx->macros;
+            pp_push_list(&subctx, NULL, dup_token_list(actuals[replace->param_idx]));
             // Macro expand the actuals
             for (first = 1;; first = 0) {
                 // Read token from subcontext
@@ -264,11 +351,11 @@ static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
             break;
         case R_PARAM_GLU:
             // Add placemarker if actual is empty
-            token = actuals[replace->param_idx];
+            token = dup_token(actuals[replace->param_idx]);
             if (!token)
                 token = create_token(TK_PLACEMARKER, NULL);
             for (; token; token = token->next) {
-                *expansion_tail = dup_token(token);
+                *expansion_tail = token;
                 expansion_tail = &(*expansion_tail)->next;
             }
             break;
@@ -311,8 +398,6 @@ recurse:
         return token;
     }
 
-    // printf("Expanding: %s\n", token->data);
-
     // We need to capture the catuals if the macro is function like
     switch (macro->type) {
     case M_FUNCTION:
@@ -324,13 +409,13 @@ recurse:
         actuals = calloc(macro->param_cnt, sizeof *actuals);
         capture_actuals(ctx, macro, actuals);
         // Expand macro
-        expansion = expand_macro(ctx, macro, actuals);
+        expansion = expand_function_macro(ctx, macro, actuals);
         // Free actuals
         free(actuals);
         break;
     case M_OBJECT:
         // Expand macro
-        expansion = macro->token_list;
+        expansion = dup_token_list(macro->body);
         break;
     }
 
@@ -346,13 +431,13 @@ recurse:
     goto recurse;
 }
 
-static void capture_formal_list(PpContext *ctx, Macro *macro)
+static void capture_formals(PpContext *ctx, Macro *macro)
 {
     Token **tail;
     Token *token;
 
     macro->param_cnt = 0;
-    tail = &macro->formal_list;
+    tail = &macro->formals;
     for (;;) {
         token = pp_next(ctx);
         if (!token)
@@ -385,7 +470,7 @@ static ssize_t find_formal(Macro *macro, Token *token)
     Token *formal;
 
     idx = 0;
-    for (formal = macro->formal_list; formal; formal = formal->next) {
+    for (formal = macro->formals; formal; formal = formal->next) {
         if (!strcmp(formal->data, token->data))
             return idx;
         ++idx;
@@ -466,12 +551,12 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
         pp_err("The ## operator must not be last in a replacement list");
 }
 
-static void capture_token_list(PpContext *ctx, Macro *macro)
+static void capture_tokens(PpContext *ctx, Macro *macro)
 {
     Token **tail, *token;
 
     // First token will already be there
-    tail = &macro->token_list->next;
+    tail = &macro->body->next;
     for (;;) {
         // Newline ends token list
         token = pp_peek(ctx);
@@ -507,13 +592,13 @@ void dir_define(PpContext *ctx)
     if (token->type == TK_LEFT_PAREN) {
         // Function like macro
         macro->type = M_FUNCTION;
-        capture_formal_list(ctx, macro);
+        capture_formals(ctx, macro);
         capture_replace_list(ctx, macro);
     } else {
         // Object-like macro
         macro->type = M_OBJECT;
-        macro->token_list = token;
-        capture_token_list(ctx, macro);
+        macro->body = token;
+        capture_tokens(ctx, macro);
     }
 }
 
@@ -532,7 +617,7 @@ void dir_undef(PpContext *ctx)
 
 void preprocess(Io *io)
 {
-    PpContext ctx = { .frame_list = NULL, .macro_list = NULL };
+    PpContext ctx = { .frames = NULL, .macros = NULL };
     _Bool     first;
     Token     *token;
 

@@ -66,19 +66,21 @@ typedef enum {
 } TokenType;
 
 // Token type
-typedef struct {
+typedef struct Token Token;
+struct Token {
     _Bool lwhite;    // Whitespace to the left
     _Bool lnew;      // Newline to the left
     _Bool no_expand; // Token can't expand anymore
     TokenType type;  // Type of token
     char *data;      // Underlying string
-} Token;
-
-// List of tokens
-VEC_GEN(Token, Token)
+    Token *next;
+};
 
 // Create a new token
 Token *create_token(TokenType type, char *data);
+
+// Duplicate a token
+Token *dup_token(Token *other);
 
 // Free a token
 void free_token(Token *token);
@@ -87,7 +89,7 @@ void free_token(Token *token);
 void output_token(Token *token);
 
 // Convert a list of tokens to a string token
-Token *stringize(VECToken *token_list);
+Token *stringize(Token *tokens);
 
 // Glue to tokens together to form one
 Token *glue(Token *left, Token *right);

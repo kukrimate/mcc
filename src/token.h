@@ -72,8 +72,8 @@ struct Token {
     _Bool lnew;      // Newline to the left
     _Bool no_expand; // Token can't expand anymore
     TokenType type;  // Type of token
-    char *data;      // Underlying string
-    Token *next;
+    char *data;      // String data from the lexer
+    Token *next;     // Next token (if used as a list)
 };
 
 // Create a new token
@@ -84,6 +84,9 @@ Token *dup_token(Token *other);
 
 // Free a token
 void free_token(Token *token);
+
+// Free a token list
+void free_tokens(Token *head);
 
 // Output a token to the screen
 void output_token(Token *token);

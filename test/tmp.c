@@ -20,3 +20,8 @@ foo(foo) (2)
 // using actual parameters twice
 #define dup(x) x x
 dup(this will be duplicated)
+
+#define obj a ## b
+obj
+
+#define lol(a,a,a)

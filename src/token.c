@@ -28,7 +28,12 @@ Token *dup_token(Token *other)
     Token *token;
 
     token = calloc(1, sizeof *token);
-    *token = *other;
+    token->lwhite = other->lwhite;
+    token->lnew = other->lnew;
+    token->no_expand = other->no_expand;
+    token->type = other->type;
+    if (other->data)
+        token->data = strdup(other->data);
     token->next = NULL;
     return token;
 }
@@ -38,6 +43,17 @@ void free_token(Token *token)
     if (token->data)
         free(token->data);
     free(token);
+}
+
+void free_tokens(Token *head)
+{
+    Token *tmp;
+
+    while (head) {
+        tmp = head->next;
+        free_token(head);
+        head = tmp;
+    }
 }
 
 // Punctuator to string conversion table
@@ -93,14 +109,16 @@ static char *punctuator_str[] = {
     [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
-static void token_to_str(Token *token, VECc *buf)
+static void token_to_str(Token *token, VECc *buf, _Bool want_white)
 {
     char *str;
 
-    if (token->lnew)
-        VECc_add(buf, '\n');
-    else if (token->lwhite)
-        VECc_add(buf, ' ');
+    if (want_white) {
+        if (token->lnew)
+            VECc_add(buf, '\n');
+        else if (token->lwhite)
+            VECc_add(buf, ' ');
+    }
 
     switch (token->type) {
     case TK_IDENTIFIER:
@@ -131,7 +149,7 @@ void output_token(Token *token)
     // Init buffer
     VECc_init(&buf);
     // Stringize token
-    token_to_str(token, &buf);
+    token_to_str(token, &buf, 1);
     VECc_add(&buf, 0);
     // Print token
     printf("%s", buf.arr);
@@ -147,7 +165,7 @@ Token *stringize(Token *tokens)
     VECc_init(&buf);
     // Stringize tokens one-by-one
     for (; tokens; tokens = tokens->next)
-        token_to_str(tokens, &buf);
+        token_to_str(tokens, &buf, 1);
     // Add NUL-terminator
     VECc_add(&buf, 0);
 
@@ -162,31 +180,30 @@ Token *glue(Token *left, Token *right)
     Token *result;
 
     // Placemarker handling
-    if (left->type == TK_PLACEMARKER) {
-        // Two placemarkers just become one
-        if (right->type == TK_PLACEMARKER)
-            return left;
-        // If left is a placemarker return right
-        return right;
-    }
-    // If right is a placemarker return left
+    if (left->type == TK_PLACEMARKER && right->type == TK_PLACEMARKER)
+        return create_token(TK_PLACEMARKER, NULL);
+    if (left->type == TK_PLACEMARKER)
+        return dup_token(right);
     if (right->type == TK_PLACEMARKER)
-        return left;
+        return dup_token(left);
 
     // Initialize buffer
     VECc_init(&buf);
     // Stringize two tokens to buffer
-    token_to_str(left, &buf);
-    token_to_str(right, &buf);
+    token_to_str(left, &buf, 0);
+    token_to_str(right, &buf, 0);
     // Add NUL-terminator
     VECc_add(&buf, 0);
 
     // Lex new buffer
     io = io_open_string(buf.arr);
     result = lex_next(io);
+    result->lwhite = left->lwhite;
+    result->lnew = left->lnew;
     // If there are more tokens, it means glue failed
     if (lex_next(io))
         pp_err("Token concatenation must result in one token");
+    // Free buffers
     io_close(io);
     VECc_free(&buf);
 

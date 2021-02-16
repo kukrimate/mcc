@@ -5,12 +5,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vec.h>
 #include "token.h"
 #include "io.h"
 #include "lex.h"
 #include "err.h"
 
+// NOTE: Not sure if libkm will be kept long term
+VEC_GEN(Token*, _Token)
+
 typedef enum {
+    R_GLUE,      // Glue opeartor
     R_TOKEN,     // Replace with a token
     R_PARAM_EXP, // Replace with a parameter expanded
     R_PARAM_STR, // Replace with a parameter stringified
@@ -25,28 +30,17 @@ struct Replace {
     Replace     *next;
 };
 
-typedef enum {
-    M_OBJECT,   // Object-like macro
-    M_FUNCTION, // Function-like macro
-} MacroType;
-
 typedef struct Macro Macro;
 struct Macro {
-    Token     *name;   // Name of this macro
-    _Bool     enabled; // Is this macro enabled?
-    MacroType type;    // Type of macro
-    union {
-        // M_OBJECT
-        struct {
-            Token    *body;       // Replacement list
-        };
-        // M_FUNCTION
-        struct {
-            size_t   param_cnt;     // Number of parameters
-            Token    *formals;      // Formal parameters
-            Replace  *replace_list; // Replacement list
-        };
-    };
+    Token     *name;         // Name of this macro
+    _Bool     enabled;       // Is this macro enabled?
+    _Bool     function_like; // Is this macro function like?
+    Replace   *replace_list; // Replacement list
+
+    // Function-like macro-only
+    size_t    param_cnt;     // Number of parameters
+    Token     *formals;      // Formal parameters
+
     Macro *next;
 };
 
@@ -85,6 +79,15 @@ static Frame *new_frame(PpContext *ctx)
     frame->next = ctx->frames;
     ctx->frames = frame;
     return frame;
+}
+
+static void drop_frame(PpContext *ctx)
+{
+    Frame *cur;
+
+    cur = ctx->frames;
+    ctx->frames = cur->next;
+    free(cur);
 }
 
 void pp_push_file(PpContext *ctx, Io *io)
@@ -129,7 +132,7 @@ recurse:
             token = lex_next(frame->io);
             if (!token) {
                 // Remove frame
-                ctx->frames = frame->next;
+                drop_frame(ctx);
                 goto recurse;
             }
         }
@@ -141,7 +144,7 @@ recurse:
             if (frame->source)
                 frame->source->enabled = 1;
             // Remove frame
-            ctx->frames = frame->next;
+            drop_frame(ctx);
             goto recurse;
         }
         // Advance token list
@@ -190,6 +193,28 @@ recurse:
     return token;
 }
 
+// Peek at next token till a newline
+static Token *pp_peek_dir(PpContext *ctx)
+{
+    Token *tmp;
+
+    tmp = pp_peek(ctx);
+    if (!tmp || tmp->lnew)
+        return NULL;
+    return tmp;
+}
+
+// Read next token till a newline
+static Token *pp_next_dir(PpContext *ctx)
+{
+    Token *tmp;
+
+    tmp = pp_peek(ctx);
+    if (!tmp || tmp->lnew)
+        return NULL;
+    return pp_next(ctx);
+}
+
 static Macro *new_macro(PpContext *ctx)
 {
     Macro *macro = calloc(1, sizeof *macro);
@@ -210,14 +235,50 @@ static Macro *find_macro(PpContext *ctx, Token *token)
     return NULL;
 }
 
+static void free_macro(Macro *macro)
+{
+    Replace *head, *tmp;
+
+    // Free macro name
+    free_token(macro->name);
+
+    // Free replacement list
+    head = macro->replace_list;
+    while (head) {
+        tmp = head->next;
+        free_token(head->token);
+        free(head);
+        head = tmp;
+    }
+
+    // Free formal parameters for function like macro
+    if (macro->function_like)
+        free_tokens(macro->formals);
+
+    free(macro);
+}
+
+static void free_macros(Macro *head)
+{
+    Macro *tmp;
+
+    while (head) {
+        tmp = head->next;
+        free_macro(head);
+        head = tmp;
+    }
+}
+
 static void del_macro(PpContext *ctx, Token *token)
 {
-    Macro **macro;
+    Macro **macro, *tmp;
 
     for (macro = &ctx->macros; *macro; macro = &(*macro)->next) {
         // Delete macro if name matches, then return
         if (!strcmp((*macro)->name->data, token->data)) {
-            *macro = (*macro)->next;
+            tmp = (*macro)->next;
+            free_macro(*macro);
+            *macro = tmp;
             return;
         }
     }
@@ -232,12 +293,14 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
     token = pp_next(ctx);
     if (!token || token->type != TK_LEFT_PAREN)
         pp_err("Missing ( for function-like macro call");
+    free_token(token);
 
     // Just check for closing parenthesis for 0 paramter macro
     if (!macro->param_cnt) {
         token = pp_next(ctx);
         if (!token || token->type != TK_RIGHT_PAREN)
             pp_err("Non-empty argument list for 0 parameter macro");
+        free_token(token);
         return;
     }
 
@@ -258,6 +321,8 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
             // Ignore comma in nested parenthesis
             if (paren_nest > 1)
                 goto add_tok;
+            // Free comma
+            free_token(token);
             // Move to next actual parameter
             if (actual_cnt >= macro->param_cnt)
                 pp_err("Too many parameters for function-like macro");
@@ -281,13 +346,15 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
         }
     }
     endloop:
+    // Free right paren
+    free_token(token);
 
     // Make sure we got the correct number of actuals
     if (macro->param_cnt != actual_cnt)
         pp_err("Too few parameters for function-like macro");
 }
 
-static Token *dup_token_list(Token *head)
+static Token *dup_tokens(Token *head)
 {
     Token *result, **tail;
 
@@ -304,126 +371,180 @@ static Token *dup_token_list(Token *head)
 
 static Token *pp_next_expand(PpContext *ctx);
 
-static Token *expand_function_macro(PpContext *ctx, Macro *macro, Token **actuals)
+static void handle_replace(PpContext *ctx, Replace *replace, Token **actuals, VEC_Token *out)
 {
-    Token     *expansion, **expansion_tail, *token;
-    Replace   *replace;
     PpContext subctx;
+    Token     *tmp;
     _Bool     first;
 
-    expansion = NULL;
-    expansion_tail = &expansion;
-    for (replace = macro->replace_list; replace; replace = replace->next) {
-        // Token from the replacement list becomes part of the result
-        if (replace->type == R_TOKEN) {
-            *expansion_tail = dup_token(replace->token);
-            expansion_tail = &(*expansion_tail)->next;
-            continue;
+    switch (replace->type) {
+    case R_GLUE:
+        // This function can't possibly get GLUE
+        // abort();
+    case R_TOKEN:
+        VEC_Token_add(out, dup_token(replace->token));
+        break;
+    case R_PARAM_EXP:
+        // We need to pre-expand the actual parameter
+        subctx.frames = NULL;
+        subctx.macros = ctx->macros;
+        pp_push_list(&subctx, NULL, dup_tokens(actuals[replace->param_idx]));
+        for (first = 1;; first = 0) {
+            // Read token from subcontext
+            tmp = pp_next_expand(&subctx);
+            if (!tmp)
+                break;
+            // Inherit spacing from replacement list
+            if (first) {
+                tmp->lwhite = replace->token->lwhite;
+                tmp->lnew = replace->token->lnew;
+            }
+            // Add token
+            VEC_Token_add(out, tmp);
+        }
+        break;
+    case R_PARAM_STR:
+        VEC_Token_add(out, stringize(actuals[replace->param_idx]));
+        break;
+    case R_PARAM_GLU:
+        if (actuals[replace->param_idx]) {
+            // Add all tokens from the actual parameter
+            for (tmp = actuals[replace->param_idx]; tmp; tmp = tmp->next)
+                VEC_Token_add(out, dup_token(tmp));
+        } else {
+            // Add placemarker if actual parameter is empty
+            VEC_Token_add(out, create_token(TK_PLACEMARKER, NULL));
+        }
+        break;
+    }
+}
+
+static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
+{
+    VEC_Token lhs, rhs;
+    Replace   *replace;
+    _Bool     had_glue;
+
+    // Create lists
+    VEC_Token_init(&lhs);
+    VEC_Token_init(&rhs);
+
+    // Get replacement list
+    replace = macro->replace_list;
+
+    while (replace) {
+        // Eat up all glue operators
+        for (had_glue = 0;; had_glue = 1) {
+            if (!replace || replace->type != R_GLUE)
+                break;
+            replace = replace->next;
         }
 
-        // Now we will need to deal with the actuals in some ways
-        switch (replace->type) {
-        case R_PARAM_EXP:
-            // We need to pre-expand the actual paramter
-            subctx.frames = NULL;
-            subctx.macros = ctx->macros;
-            pp_push_list(&subctx, NULL, dup_token_list(actuals[replace->param_idx]));
-            // Macro expand the actuals
-            for (first = 1;; first = 0) {
-                // Read token from subcontext
-                token = pp_next_expand(&subctx);
-                if (!token)
-                    break;
-                // Inherit spacing from replacement list
-                if (first) {
-                    token->lwhite = replace->token->lwhite;
-                    token->lnew = replace->token->lnew;
-                }
-                // Append to expansion
-                *expansion_tail = token;
-                expansion_tail = &(*expansion_tail)->next;
-            }
-            break;
-        case R_PARAM_STR:
-            token = stringize(actuals[replace->param_idx]);
-            *expansion_tail = token;
-            expansion_tail = &(*expansion_tail)->next;
-            break;
-        case R_PARAM_GLU:
-            // Add placemarker if actual is empty
-            token = dup_token(actuals[replace->param_idx]);
-            if (!token)
-                token = create_token(TK_PLACEMARKER, NULL);
-            for (; token; token = token->next) {
-                *expansion_tail = token;
-                expansion_tail = &(*expansion_tail)->next;
-            }
-            break;
-        default:
-            break;
+        if (had_glue) {
+            // We need to do a glue
+            Token *l, *r;
+
+            // Get RHS token sequence
+            handle_replace(ctx, replace, actuals, &rhs);
+            replace = replace->next;
+
+            // Glue first token of RHS to last token of LHS
+            l = VEC_Token_pop(&lhs);
+            r = rhs.arr[0];
+            VEC_Token_add(&lhs, glue(l, r));
+            free_token(l);
+            free_token(r);
+
+            // Add rest of RHS to LHS
+            VEC_Token_addall(&lhs, rhs.arr + 1, rhs.n - 1);
+            rhs.n = 0;
+        } else {
+            // Otherwise just process the replace element
+            handle_replace(ctx, replace, actuals, &lhs);
+            replace = replace->next;
         }
     }
 
-    return expansion;
+    // Create linked-list from LHS
+    {
+        Token  *head, **tail;
+        size_t i;
+
+        head = NULL;
+        tail = &head;
+
+        for (i = 0; i < lhs.n; ++i) {
+            *tail = lhs.arr[i];
+            tail = &(*tail)->next;
+        }
+
+        VEC_Token_free(&lhs);
+        VEC_Token_free(&rhs);
+        return head;
+    }
 }
 
 Token *pp_next_expand(PpContext *ctx)
 {
-    Token  *token, *lparen, *expansion;
+    Token  *identifier, *lparen, **actuals, *expansion;
     Macro  *macro;
-    Token  **actuals;
+    size_t i;
 
 recurse:
-    // Read token from the frame stack
-    token = pp_next(ctx);
-    if (!token)
+    // Read identifier from the frame stack
+    identifier = pp_next(ctx);
+    if (!identifier)
         return NULL;
 
     // Ignore placemarkers resulting from previous expansions
-    if (token->type == TK_PLACEMARKER)
+    if (identifier->type == TK_PLACEMARKER) {
+        free_token(identifier);
         goto recurse;
-
-    // Return token if no macro expansion is required
-    if (token->type != TK_IDENTIFIER || token->no_expand)
-        return token;
-
-    // See if the token is a macro name
-    macro = find_macro(ctx, token);
-    if (!macro)
-        return token;
-
-    // If macro is disabled here, this token can *never* expand again
-    if (!macro->enabled) {
-        token->no_expand = 1;
-        return token;
     }
 
-    // We need to capture the catuals if the macro is function like
-    switch (macro->type) {
-    case M_FUNCTION:
+    // Return identifier if no macro expansion is required
+    if (identifier->type != TK_IDENTIFIER || identifier->no_expand)
+        return identifier;
+
+    // See if the identifier is a macro name
+    macro = find_macro(ctx, identifier);
+    if (!macro)
+        return identifier;
+
+    // If macro is disabled here, this identifier can *never* expand again
+    if (!macro->enabled) {
+        identifier->no_expand = 1;
+        return identifier;
+    }
+
+    // We need to capture the actuals if the macro is function like
+    if (macro->function_like) {
         // If there are no actuals provided, we don't expand
         lparen = pp_peek(ctx);
         if (!lparen || lparen->type != TK_LEFT_PAREN)
-            return token;
+            return identifier;
         // Capture the actuals
         actuals = calloc(macro->param_cnt, sizeof *actuals);
         capture_actuals(ctx, macro, actuals);
         // Expand macro
-        expansion = expand_function_macro(ctx, macro, actuals);
+        expansion = expand_macro(ctx, macro, actuals);
         // Free actuals
+        for (i = 0; i < macro->param_cnt; ++i)
+            free_tokens(actuals[i]);
         free(actuals);
-        break;
-    case M_OBJECT:
+    } else {
         // Expand macro
-        expansion = dup_token_list(macro->body);
-        break;
+        expansion = expand_macro(ctx, macro, NULL);
     }
 
-    // First resulting token inherits the macro identifier's spacing
+    // First resulting tokenr inherits the macro identifier's spacing
     if (expansion) {
-        expansion->lwhite = token->lwhite;
-        expansion->lnew = token->lnew;
+        expansion->lwhite = identifier->lwhite;
+        expansion->lnew = identifier->lnew;
     }
+
+    // Free identifier
+    free_token(identifier);
 
     // Push result after a successful expansion
     pp_push_list(ctx, macro, expansion);
@@ -433,41 +554,54 @@ recurse:
 
 static void capture_formals(PpContext *ctx, Macro *macro)
 {
-    Token **tail;
-    Token *token;
+    Token **tail, *tmp;
 
-    macro->param_cnt = 0;
+    // First token must be an lparen
+    tmp = pp_next_dir(ctx);
+    if (!tmp || tmp->type != TK_LEFT_PAREN)
+        pp_err("Formal parameters must start with (");
+
+    // Initialize token list
     tail = &macro->formals;
-    for (;;) {
-        token = pp_next(ctx);
-        if (!token)
-            pp_err("Unexpected end of formal parameters");
+    macro->param_cnt = 0;
 
-        switch (token->type) {
-        case TK_IDENTIFIER:
-            // Save formal parameter
-            *tail = token;
-            tail = &(*tail)->next;
-            ++macro->param_cnt;
-            // Paramter name must be followed either by a , or )
-            token = pp_next(ctx);
-            if (token->type == TK_RIGHT_PAREN) // End of formals
-                return;
-            else if (token->type != TK_COMMA)
-                pp_err("Invalid token in formal parameter list");
-            break;
-        case TK_RIGHT_PAREN: // End of formals
-            return;
-        default:             // No other tokens are valid here
-            pp_err("Invalid token in formal parameter list");
-        }
-    }
+want_ident:
+    // Free previous token
+    free_token(tmp);
+
+    // Read formal parameter name
+    tmp = pp_next_dir(ctx);
+    if (!tmp)
+        pp_err("Formal parameter name missing");
+    if (tmp->type == TK_RIGHT_PAREN)
+        goto end;
+    if (tmp->type != TK_IDENTIFIER)
+        pp_err("Invalid token in formal parameter list");;
+
+    // Add name to the list
+    *tail = tmp;
+    tail = &(*tail)->next;
+    ++macro->param_cnt;
+
+    // Next token must be a , or )
+    tmp = pp_next_dir(ctx);
+    if (!tmp)
+        pp_err("Unexpected end of formal parameters");
+    if (tmp->type == TK_COMMA)
+        goto want_ident;
+    if (tmp->type != TK_RIGHT_PAREN)
+        pp_err("Invalid token in formal parameter list");
+end:
+    free_token(tmp);
 }
 
 static ssize_t find_formal(Macro *macro, Token *token)
 {
     size_t idx;
     Token *formal;
+
+    if (token->type != TK_IDENTIFIER)
+        return -1;
 
     idx = 0;
     for (formal = macro->formals; formal; formal = formal->next) {
@@ -480,139 +614,114 @@ static ssize_t find_formal(Macro *macro, Token *token)
 
 static void capture_replace_list(PpContext *ctx, Macro *macro)
 {
-    Replace **tail;
-    Token   *token;
+    Replace *prev, **tail;
+    Token   *tmp;
     ssize_t formal_idx;
-    _Bool   stringify;
-    _Bool   glue;
+    _Bool   do_glue;
 
+    prev = NULL;
     tail = &macro->replace_list;
-    stringify = 0;
-    glue = 0;
-    for (;;) {
-        // Newline ends replacement list
-        token = pp_peek(ctx);
-        if (token && token->lnew)
-            goto break_loop;
+    do_glue = 0;
 
-        token = pp_next(ctx);
-        // EOF ends replacement list
-        if (!token)
-            goto break_loop;
+    while ((tmp = pp_next_dir(ctx))) {
+        switch (tmp->type) {
+        case TK_HASH_HASH:
+            // Must be preceeded by something
+            if (!macro->replace_list)
+                pp_err("## operator must not be the first token of a replacement list");
 
-        switch (token->type) {
-        case TK_HASH:
-            // Wait for the right-hand-side of stringify
-            stringify = 1;
+            // Do *not* expand parameter before ## operator
+            if (prev->type == R_PARAM_EXP)
+                prev->type = R_PARAM_GLU;
+
+            // Wait for the right-hand-side of glue
+            do_glue = 1;
+
+            // Add a glue operator to the list
+            prev = *tail = calloc(1, sizeof **tail);
+            (*tail)->type = R_GLUE;
+            (*tail)->token = tmp;
+            tail = &(*tail)->next;
             break;
-        // case TK_HASH_HASH:
-        //     // Must be preceeded by something
-        //     if (!macro->replace_list)
-        //         pp_err();
+        case TK_HASH:
+            if (macro->function_like) {
+                // Free hash
+                free_token(tmp);
+                // Get formal parameter name
+                tmp = pp_next_dir(ctx);
+                if (!tmp || (formal_idx = find_formal(macro, tmp)) < 0) {
+                    pp_err("# opeartor must be followed by formal parameter name");
+                }
 
-        //     // Do *not* expand parameter before ## operator
-        //     if ((*tail)->type == R_PARAM_EXP)
-        //         (*tail)->type = R_PARAM_GLU;
-
-        //     // Wait for the right-hand-side of glue
-        //     glue = 1;
-
-        //     // Still need to add the operator as a token
-        //     *tail = calloc(1, sizeof **tail);
-        //     (*tail)->type = R_TOKEN;
-        //     (*tail)->token = token;
-        //     tail = &(*tail)->next;
-        //     break;
+                prev = *tail = calloc(1, sizeof **tail);
+                (*tail)->type = R_PARAM_STR;
+                (*tail)->token = tmp;
+                (*tail)->param_idx = formal_idx;
+                break;
+            }
+            // FALLTHROUGH
         default:
             // Append token or parameter index to replacement list
-            *tail = calloc(1, sizeof **tail);
-            if (token->type == TK_IDENTIFIER
-                    && (formal_idx = find_formal(macro, token)) >= 0) {
-                (*tail)->type  = stringify ? R_PARAM_STR :
-                                 (glue ? R_PARAM_GLU : R_PARAM_EXP);
-                (*tail)->param_idx = formal_idx;
-                (*tail)->token = token;
-            } else {
+            prev = *tail = calloc(1, sizeof **tail);
+            if (!macro->function_like || (formal_idx = find_formal(macro, tmp)) < 0) {
                 (*tail)->type = R_TOKEN;
-                (*tail)->token = token;
+                (*tail)->token = tmp;
+            } else {
+                (*tail)->type  = do_glue ? R_PARAM_GLU : R_PARAM_EXP;
+                (*tail)->token = tmp;
+                (*tail)->param_idx = formal_idx;
             }
             tail = &(*tail)->next;
-            stringify = 0;
-            glue = 0;
+            do_glue = 0;
             break;
         }
     }
-    break_loop:
 
-    // These must *not* be left incomplete
-    if (stringify)
-        pp_err("The # operator must not be last in a replacement list");
-    if (glue)
-        pp_err("The ## operator must not be last in a replacement list");
+    if (do_glue)
+        pp_err("## operator must not be the last token in a replacement list");
 }
 
-static void capture_tokens(PpContext *ctx, Macro *macro)
+static void dir_define(PpContext *ctx)
 {
-    Token **tail, *token;
-
-    // First token will already be there
-    tail = &macro->body->next;
-    for (;;) {
-        // Newline ends token list
-        token = pp_peek(ctx);
-        if (token && token->lnew)
-            break;
-        // EOF ends token list
-        token = pp_next(ctx);
-        if (!token)
-            break;
-        // Add token
-        *tail = token;
-        tail = &(*tail)->next;
-    }
-}
-
-void dir_define(PpContext *ctx)
-{
-    Token *token;
+    Token *tmp;
     Macro *macro;
 
     // Macro name must be an identifier
-    token = pp_next(ctx);
-    if (token->type != TK_IDENTIFIER)
+    tmp = pp_next_dir(ctx);
+    if (tmp->type != TK_IDENTIFIER)
         pp_err("Macro name must be an identifier");
 
     // Put macro name into database and get pointer to struct
     macro = new_macro(ctx);
-    macro->name = token;
+    macro->name = tmp;
     macro->enabled = 1;
 
     // Check for macro type
-    token = pp_next(ctx);
-    if (token->type == TK_LEFT_PAREN) {
+    tmp = pp_peek_dir(ctx);
+    if (tmp && tmp->type == TK_LEFT_PAREN) {
         // Function like macro
-        macro->type = M_FUNCTION;
+        macro->function_like = 1;
         capture_formals(ctx, macro);
-        capture_replace_list(ctx, macro);
     } else {
         // Object-like macro
-        macro->type = M_OBJECT;
-        macro->body = token;
-        capture_tokens(ctx, macro);
+        macro->function_like = 0;
     }
+
+    // Capture replacement list
+    capture_replace_list(ctx, macro);
 }
 
-void dir_undef(PpContext *ctx)
+static void dir_undef(PpContext *ctx)
 {
-    Token *token;
+    Token *tmp;
 
     // Macro name must be an identifier
-    token = pp_next(ctx);
-    if (token->type != TK_IDENTIFIER)
+    tmp = pp_next_dir(ctx);
+    if (!tmp || tmp->type != TK_IDENTIFIER)
         pp_err("Macro name must be an identifier");
-
     // Delete macro
-    del_macro(ctx, token);
+    del_macro(ctx, tmp);
+    free_token(tmp);
 }
 
 void preprocess(Io *io)
@@ -631,9 +740,12 @@ void preprocess(Io *io)
         if (token->type == TK_HASH) {
             // Check if we need to recognize a directive
             if (first || token->lnew) {
+                // Free hash
+                free_token(token);
+
                 // Directive name must be an identifier
-                token = pp_next(&ctx);
-                if (token->type != TK_IDENTIFIER)
+                token = pp_next_dir(&ctx);
+                if (!token || token->type != TK_IDENTIFIER)
                     pp_err("Pre-processing directive must be an identifier");
                 // Check for all supported directives
                 if (!strcmp(token->data, "define"))
@@ -643,6 +755,8 @@ void preprocess(Io *io)
                 else
                     pp_err("Unknown pre-prerocessing directive");
 
+                // Free directive name
+                free_token(token);
                 // Don't output anything after processing directive
                 continue;
             }
@@ -650,5 +764,8 @@ void preprocess(Io *io)
 
         // We need to output the token here
         output_token(token);
+        free_token(token);
     }
+
+    free_macros(ctx.macros);
 }

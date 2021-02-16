@@ -9,7 +9,8 @@
 
 static inline NORETURN void pp_err(const char *err)
 {
-    fprintf(stderr, "Preprocessor error: %s\n", err);
+    fflush(stdout);
+    fprintf(stderr, "\nPreprocessor error: %s\n", err);
     exit(1);
 }
 

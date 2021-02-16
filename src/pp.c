@@ -530,6 +530,23 @@ recurse:
     goto recurse;
 }
 
+static ssize_t find_formal(Macro *macro, Token *token)
+{
+    size_t idx;
+    Token *formal;
+
+    if (token->type != TK_IDENTIFIER)
+        return -1;
+
+    idx = 0;
+    for (formal = macro->formals; formal; formal = formal->next) {
+        if (!strcmp(formal->data, token->data))
+            return idx;
+        ++idx;
+    }
+    return -1;
+}
+
 static void capture_formals(PpContext *ctx, Macro *macro)
 {
     Token **tail, *tmp;
@@ -564,6 +581,10 @@ want_ident:
     if (tmp->type != TK_IDENTIFIER)
         pp_err("Invalid token in formal parameter list");
 
+    // Make sure it's not duplicate
+    if (find_formal(macro, tmp) >= 0)
+        pp_err("Duplicate formal parameter name");
+
     // Add name to the list
     *tail = tmp;
     tail = &(*tail)->next;
@@ -582,23 +603,6 @@ want_ident:
         pp_err("Invalid token in formal parameter list");
 end:
     free_token(tmp);
-}
-
-static ssize_t find_formal(Macro *macro, Token *token)
-{
-    size_t idx;
-    Token *formal;
-
-    if (token->type != TK_IDENTIFIER)
-        return -1;
-
-    idx = 0;
-    for (formal = macro->formals; formal; formal = formal->next) {
-        if (!strcmp(formal->data, token->data))
-            return idx;
-        ++idx;
-    }
-    return -1;
 }
 
 static void capture_replace_list(PpContext *ctx, Macro *macro)

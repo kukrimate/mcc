@@ -651,6 +651,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
                 (*tail)->token = tmp;
                 (*tail)->param_idx = formal_idx;
                 tail = &(*tail)->next;
+                do_glue = 0;
                 break;
             }
             // FALLTHROUGH

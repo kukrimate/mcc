@@ -24,4 +24,6 @@ dup(this will be duplicated)
 #define obj a ## b
 obj
 
-#define lol(a,a,a)
+#define lol(a,b,c) #a ## b ## #c
+
+lol(this, is, me)

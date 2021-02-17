@@ -218,19 +218,6 @@ static void string(int ch, Io *io, Token *token)
     }
 }
 
-static _Bool next_nl(Io *io)
-{
-    if (io_next(io, '\r')) {
-        io_next(io, '\n');
-        return 1;
-    }
-
-    if (io_next(io, '\n'))
-        return 1;
-
-    return 0;
-}
-
 Token *lex_next(Io *io)
 {
     Token *token;
@@ -241,6 +228,7 @@ Token *lex_next(Io *io)
     retry:
     switch ((ch = io_getc(io))) {
     // Whitespace
+    case '\r':
     case '\f':
     case '\v':
     case '\t':
@@ -252,15 +240,12 @@ Token *lex_next(Io *io)
         free(token);
         return NULL;
     // End of line
-    case '\r':
-        io_next(io, '\n');
-        // FALLTHROUGH
     case '\n':
         token->lnew = 1;
         goto retry;
     // Line concatanation
     case '\\':
-        if (next_nl(io))
+        if (io_next(io, '\n'))
             goto retry;
         break;
     // Identifier
@@ -363,11 +348,12 @@ Token *lex_next(Io *io)
         return token;
     case '/':
         if (io_next(io, '/')) {                        // Line comment
-            while (!next_nl(io))
-                io_getc(io);
-            token->lwhite = 1;
+            while (io_getc(io) != '\n');
+            token->lnew = 1;
             goto retry;
-        } else if (io_next(io, '*')) {                 // Block comment
+        }
+
+        if (io_next(io, '*')) {                        // Block comment
             for (;;) {
                 ch = io_getc(io);
                 if (ch == EOF)

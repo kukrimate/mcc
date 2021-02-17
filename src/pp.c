@@ -126,7 +126,7 @@ recurse:
         frame->last = NULL;
         if (!token) {
             // Read token directly from lexer
-            token = lex_next(frame->io);
+            token = lex_next(frame->io, 0);
             if (!token) {
                 // Remove frame
                 drop_frame(ctx);
@@ -167,7 +167,7 @@ recurse:
     case F_LEXER:
         // Fill frame->last if it doesn't exist
         if (!frame->last) {
-            frame->last = lex_next(frame->io);
+            frame->last = lex_next(frame->io, 0);
             if (!frame->last) {
                 // Peek at next frame
                 frame = frame->next;

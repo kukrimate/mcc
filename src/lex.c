@@ -72,6 +72,7 @@ static void pp_num(int ch, Io *io, Token *token)
         }
 }
 
+#if 0
 static void octal(int ch, Io *io, VECc *v)
 {
     ch -= '0';
@@ -155,70 +156,40 @@ static void escseq(int ch, Io *io, VECc *v)
         pp_err("Invalid escape sequence");
     }
 }
+#endif
 
-static void character(int ch, Io *io, Token *token)
-{
-    VECc buf;
-
-    VECc_init(&buf);
-
-    for (;;) {
-        ch = io_getc(io);
-        switch (ch) {
-        // Normal character
-        default:
-            VECc_add(&buf, ch);
-            break;
-        // Escape sequence
-        case '\\':
-            escseq(ch, io, &buf);
-            break;
-        // End of character constant
-        case '\'':
-            VECc_add(&buf, 0);
-            token->type = TK_CHAR_CONST;
-            token->data = buf.arr;
-            return;
-        // Unterminated character constant
-        case EOF:
-        case '\n':
-            pp_err("Unterminated character constant");
-        }
-    }
+#define GEN_LITERAL(func_name, token_type, endch)   \
+static void func_name(int ch, Io *io, Token *token) \
+{                                                   \
+    VECc buf;                                       \
+    VECc_init(&buf);                                \
+    for (;;) {                                      \
+        ch = io_getc(io);                           \
+        switch (ch) {                               \
+        /* Normal character */                      \
+        default:                                    \
+            VECc_add(&buf, ch);                     \
+            break;                                  \
+        /* End of literal */                        \
+        case endch:                                 \
+            VECc_add(&buf, 0);                      \
+            token->type = token_type;               \
+            token->data = buf.arr;                  \
+            return;                                 \
+        /* Unterminated literal */                  \
+        case EOF:                                   \
+        case '\n':                                  \
+            pp_err("Unterminated literal");         \
+        }                                           \
+    }                                               \
 }
 
-static void string(int ch, Io *io, Token *token)
-{
-    VECc buf;
+// Generate literal parsing functions
+GEN_LITERAL(string, TK_STRING_LIT, '\"')
+GEN_LITERAL(character, TK_CHAR_CONST, '\'')
+GEN_LITERAL(header_name, TK_HEADER_NAME, '>')
 
-    VECc_init(&buf);
-
-    for (;;) {
-        ch = io_getc(io);
-        switch (ch) {
-        // Normal character
-        default:
-            VECc_add(&buf, ch);
-            break;
-        // Escape sequence
-        case '\\':
-            escseq(ch, io, &buf);
-            break;
-        // End of string
-        case '\"':
-            VECc_add(&buf, 0);
-            token->type = TK_STRING_LIT;
-            token->data = buf.arr;
-            return;
-        // Invalid string
-        case EOF:
-        case '\n':
-            pp_err("Unterminated string literal");
-        }
-    }
-}
-
-Token *lex_next(Io *io)
+Token *lex_next(Io *io, _Bool want_header_name)
 {
     Token *token;
     int ch;
@@ -385,6 +356,11 @@ Token *lex_next(Io *io)
         }
         return token;
     case '<':
+        if (want_header_name) {                        // Header name
+            header_name(ch, io, token);
+            return token;
+        }
+
         if (io_next(io, '<')) {
             if (io_next(io, '='))                      // <<=
                 token->type = TK_LSHIFT_EQUAL;

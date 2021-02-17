@@ -197,11 +197,11 @@ Token *glue(Token *left, Token *right)
 
     // Lex new buffer
     io = io_open_string(buf.arr);
-    result = lex_next(io);
+    result = lex_next(io, 0);
     result->lwhite = left->lwhite;
     result->lnew = left->lnew;
     // If there are more tokens, it means glue failed
-    if (lex_next(io))
+    if (lex_next(io, 0))
         pp_err("Token concatenation must result in one token");
     // Free buffers
     io_close(io);

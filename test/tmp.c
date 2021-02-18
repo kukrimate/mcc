@@ -23,3 +23,9 @@ dup(this will be duplicated)
 
 #define obj a ## b
 a dup()obj
+
+#define EMPTY
+
+EMPTY#define LOL xy
+
+LOL

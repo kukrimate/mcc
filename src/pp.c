@@ -785,7 +785,9 @@ next:
     if (!tmp)
         return NULL;
 
-    if (ctx->newline && tmp->type == TK_HASH) {
+    // Directives can only come from a lexer frame and after a newline
+    if (ctx->frames->type == F_LEXER &&
+            ctx->newline && tmp->type == TK_HASH) {
         handle_directive(ctx);
         free_token(tmp);
         goto next;

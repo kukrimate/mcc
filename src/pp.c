@@ -452,7 +452,7 @@ static Token *read_newlines(PpContext *ctx)
 
 Token *pp_next_expand(PpContext *ctx)
 {
-    Token  *identifier, *newlines, *lparen, **actuals, *expansion;
+    Token  *identifier, *newlines, *lparen, *last, **actuals, *expansion;
     Macro  *macro;
     size_t i;
 
@@ -463,10 +463,8 @@ recurse:
         return NULL;
 
     // Ignore placemarkers resulting from previous expansions
-    if (identifier->type == TK_PLACEMARKER) {
-        free_token(identifier);
-        goto recurse;
-    }
+    if (identifier->type == TK_PLACEMARKER)
+        goto retry;
 
     // Return identifier if no macro expansion is required
     if (identifier->type != TK_IDENTIFIER || identifier->no_expand)
@@ -512,15 +510,15 @@ recurse:
         expansion = expand_macro(ctx, macro, NULL);
     }
 
-    // First resulting tokenr inherits the macro identifier's spacing
-    if (expansion)
-        expansion->lwhite = identifier->lwhite;
+    // Push result after expansion
+    pp_push_list(ctx, macro, expansion);
 
+retry:
+    // Next token on the stream inherits our spacing
+    if ((last = pp_peek(ctx)))
+        last->lwhite = identifier->lwhite;
     // Free identifier
     free_token(identifier);
-
-    // Push result after a successful expansion
-    pp_push_list(ctx, macro, expansion);
 
     // Continue recursively expanding
     goto recurse;

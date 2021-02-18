@@ -22,4 +22,4 @@ foo(foo) (2)
 dup(this will be duplicated)
 
 #define obj a ## b
-obj
+a dup()obj

@@ -53,7 +53,6 @@ struct Frame {
         // F_LEXER
         struct {
             Io    *io;     // Token source
-            Token *last;   // Saved token from peaking
         };
         // F_LIST
         struct {
@@ -119,19 +118,15 @@ recurse:
     frame = ctx->frames;
     if (!frame)
         return NULL;
+
     switch (frame->type) {
     case F_LEXER:
-        // Get saved token
-        token = frame->last;
-        frame->last = NULL;
+        // Read token directly from lexer
+        token = lex_next(frame->io, 0);
         if (!token) {
-            // Read token directly from lexer
-            token = lex_next(frame->io, 0);
-            if (!token) {
-                // Remove frame
-                drop_frame(ctx);
-                goto recurse;
-            }
+            // Remove frame
+            drop_frame(ctx);
+            goto recurse;
         }
         break;
     case F_LIST:
@@ -163,19 +158,18 @@ static Token *pp_peek(PpContext *ctx)
 recurse:
     if (!frame)
         return NULL;
+
     switch (frame->type) {
     case F_LEXER:
         // Fill frame->last if it doesn't exist
-        if (!frame->last) {
-            frame->last = lex_next(frame->io, 0);
-            if (!frame->last) {
-                // Peek at next frame
-                frame = frame->next;
-                goto recurse;
-            }
+        token = lex_next(frame->io, 0);
+        if (!token) {
+            // Peek at next frame
+            frame = frame->next;
+            goto recurse;
         }
-        // Return frame->last
-        token = frame->last;
+        // Push new token for next call
+        pp_push_list(ctx, NULL, token);
         break;
     case F_LIST:
         token = frame->tokens;
@@ -188,28 +182,6 @@ recurse:
     }
 
     return token;
-}
-
-// Peek at next token till a newline
-static Token *pp_peek_dir(PpContext *ctx)
-{
-    Token *tmp;
-
-    tmp = pp_peek(ctx);
-    if (!tmp || tmp->lnew)
-        return NULL;
-    return tmp;
-}
-
-// Read next token till a newline
-static Token *pp_next_dir(PpContext *ctx)
-{
-    Token *tmp;
-
-    tmp = pp_peek(ctx);
-    if (!tmp || tmp->lnew)
-        return NULL;
-    return pp_next(ctx);
 }
 
 static Macro *new_macro(PpContext *ctx)
@@ -283,48 +255,48 @@ static void del_macro(PpContext *ctx, Token *token)
 
 static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
 {
-    Token *token, **tokens;
+    Token *tmp, **tmps;
     size_t actual_cnt, paren_nest;
 
     // Argument list needs to start with (
-    token = pp_next(ctx);
-    if (!token || token->type != TK_LEFT_PAREN)
+    tmp = pp_next(ctx);
+    if (!tmp || tmp->type != TK_LEFT_PAREN)
         pp_err("Missing ( for function-like macro call");
-    free_token(token);
+    free_token(tmp);
 
     // Just check for closing parenthesis for 0 paramter macro
     if (!macro->param_cnt) {
-        token = pp_next(ctx);
-        if (!token || token->type != TK_RIGHT_PAREN)
+        tmp = pp_next(ctx);
+        if (!tmp || tmp->type != TK_RIGHT_PAREN)
             pp_err("Non-empty argument list for 0 parameter macro");
-        free_token(token);
+        free_token(tmp);
         return;
     }
 
     // Start of actuals
     actual_cnt = 0;
-    tokens = &actuals[actual_cnt++];
+    tmps = &actuals[actual_cnt++];
 
     // Start at 1 deep parenthesis
     paren_nest = 1;
 
     for (;;) {
-        token = pp_next(ctx);
-        if (!token)
+        tmp = pp_next(ctx);
+        if (!tmp)
             pp_err("Unexpected end of parameters");
 
-        switch (token->type) {
+        switch (tmp->type) {
         case TK_COMMA:
             // Ignore comma in nested parenthesis
             if (paren_nest > 1 ||
                     (macro->has_varargs && macro->param_cnt == actual_cnt))
                 goto add_tok;
             // Free comma
-            free_token(token);
+            free_token(tmp);
             // Move to next actual parameter
             if (actual_cnt >= macro->param_cnt)
                 pp_err("Too many parameters for function-like macro");
-            tokens = &actuals[actual_cnt++];
+            tmps = &actuals[actual_cnt++];
             break;
         case TK_LEFT_PAREN:
             // Increase nesting level
@@ -337,15 +309,16 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
             goto add_tok;
         default:
         add_tok:
-            // Add token to actual paramter's token list
-            *tokens = token;
-            tokens = &(*tokens)->next;
+            // Add tmp to actual paramter's tmp list
+            *tmps = tmp;
+            tmps = &(*tmps)->next;
             break;
         }
     }
     endloop:
+
     // Free right paren
-    free_token(token);
+    free_token(tmp);
 
     // Make sure we got the correct number of actuals
     if (macro->param_cnt != actual_cnt)
@@ -424,15 +397,12 @@ static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
             subctx.macros = ctx->macros;
             pp_push_list(&subctx, NULL, dup_tokens(actuals[replace->param_idx]));
             for (first = 1;; first = 0) {
-                // Read token from subcontext
                 tmp = pp_next_expand(&subctx);
                 if (!tmp)
                     break;
                 // Inherit spacing from replacement list
-                if (first) {
+                if (first)
                     tmp->lwhite = replace->token->lwhite;
-                    tmp->lnew = replace->token->lnew;
-                }
                 // Add token
                 if (*tail)
                     tail = &(*tail)->next;
@@ -462,9 +432,27 @@ static Token *expand_macro(PpContext *ctx, Macro *macro, Token **actuals)
     return head;
 }
 
+static Token *read_newlines(PpContext *ctx)
+{
+    Token *head, **tail, *tmp;
+
+    head = NULL;
+    tail = &head;
+
+    for (;;) {
+        tmp = pp_peek(ctx);
+        if (!tmp || tmp->type != TK_END_LINE)
+            break;
+        *tail = pp_next(ctx);
+        tail = &(*tail)->next;
+    }
+
+    return head;
+}
+
 Token *pp_next_expand(PpContext *ctx)
 {
-    Token  *identifier, *lparen, **actuals, *expansion;
+    Token  *identifier, *newlines, *lparen, **actuals, *expansion;
     Macro  *macro;
     size_t i;
 
@@ -497,10 +485,19 @@ recurse:
 
     // We need to capture the actuals if the macro is function like
     if (macro->function_like) {
+        // Read newline before lparen
+        newlines = read_newlines(ctx);
         // If there are no actuals provided, we don't expand
         lparen = pp_peek(ctx);
-        if (!lparen || lparen->type != TK_LEFT_PAREN)
+        if (!lparen || lparen->type != TK_LEFT_PAREN) {
+            // Push newlines back
+            if (newlines)
+                pp_push_list(ctx, NULL, newlines);
+            // Return identifier
             return identifier;
+        }
+        // Now we can get rid of newlines
+        free_tokens(newlines);
         // Capture the actuals
         actuals = calloc(macro->param_cnt, sizeof *actuals);
         capture_actuals(ctx, macro, actuals);
@@ -516,16 +513,15 @@ recurse:
     }
 
     // First resulting tokenr inherits the macro identifier's spacing
-    if (expansion) {
+    if (expansion)
         expansion->lwhite = identifier->lwhite;
-        expansion->lnew = identifier->lnew;
-    }
 
     // Free identifier
     free_token(identifier);
 
     // Push result after a successful expansion
     pp_push_list(ctx, macro, expansion);
+
     // Continue recursively expanding
     goto recurse;
 }
@@ -552,7 +548,7 @@ static void capture_formals(PpContext *ctx, Macro *macro)
     Token **tail, *tmp;
 
     // First token must be an lparen
-    tmp = pp_next_dir(ctx);
+    tmp = pp_next(ctx);
     if (!tmp || tmp->type != TK_LEFT_PAREN)
         pp_err("Formal parameters must start with (");
 
@@ -566,9 +562,9 @@ want_ident:
     free_token(tmp);
 
     // Read formal parameter name
-    tmp = pp_next_dir(ctx);
+    tmp = pp_next(ctx);
     if (!tmp)
-        pp_err("Formal parameter name missing");
+        pp_err("Unexpected end of formal parameters");
     if (tmp->type == TK_RIGHT_PAREN)
         goto end;
     // Variable argument mode
@@ -591,7 +587,7 @@ want_ident:
     ++macro->param_cnt;
 
     // Next token must be a , or )
-    tmp = pp_next_dir(ctx);
+    tmp = pp_next(ctx);
     if (!tmp)
         pp_err("Unexpected end of formal parameters");
     if (tmp->type == TK_COMMA) {
@@ -616,8 +612,13 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
     tail = &macro->replace_list;
     do_glue = 0;
 
-    while ((tmp = pp_next_dir(ctx))) {
+    while ((tmp = pp_next(ctx))) {
         switch (tmp->type) {
+        case TK_END_LINE:
+            // Free terminator token
+            free_token(tmp);
+            // End of replacement list
+            goto endloop;
         case TK_HASH_HASH:
             // Must be preceeded by something
             if (!macro->replace_list)
@@ -641,7 +642,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
                 // Free hash
                 free_token(tmp);
                 // Get formal parameter name
-                tmp = pp_next_dir(ctx);
+                tmp = pp_next(ctx);
                 if (!tmp || (formal_idx = find_formal(macro, tmp)) < 0) {
                     pp_err("# opeartor must be followed by formal parameter name");
                 }
@@ -671,6 +672,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
             break;
         }
     }
+    endloop:
 
     if (do_glue)
         pp_err("## operator must not be the last token in a replacement list");
@@ -682,8 +684,8 @@ static void dir_define(PpContext *ctx)
     Macro *macro;
 
     // Macro name must be an identifier
-    tmp = pp_next_dir(ctx);
-    if (tmp->type != TK_IDENTIFIER)
+    tmp = pp_next(ctx);
+    if (!tmp || tmp->type != TK_IDENTIFIER)
         pp_err("Macro name must be an identifier");
 
     // Put macro name into database and get pointer to struct
@@ -692,7 +694,7 @@ static void dir_define(PpContext *ctx)
     macro->enabled = 1;
 
     // Check for macro type
-    tmp = pp_peek_dir(ctx);
+    tmp = pp_peek(ctx);
     if (tmp && tmp->type == TK_LEFT_PAREN) {
         // Function like macro
         macro->function_like = 1;
@@ -711,7 +713,7 @@ static void dir_undef(PpContext *ctx)
     Token *tmp;
 
     // Macro name must be an identifier
-    tmp = pp_next_dir(ctx);
+    tmp = pp_next(ctx);
     if (!tmp || tmp->type != TK_IDENTIFIER)
         pp_err("Macro name must be an identifier");
     // Delete macro
@@ -719,47 +721,54 @@ static void dir_undef(PpContext *ctx)
     free_token(tmp);
 }
 
+static void handle_directive(PpContext *ctx)
+{
+    Token *tmp;
+
+    tmp = pp_next(ctx);
+
+    // Check for empty directive
+    if (!tmp) {
+        return;
+    } else if (tmp->type == TK_END_LINE) {
+        free_token(tmp);
+        return;
+    }
+
+    // Otherwise the directive name must follow
+    if (tmp->type != TK_IDENTIFIER)
+        pp_err("Pre-processing directive must be an identifier");
+
+    // Check for all supported directives
+    if (!strcmp(tmp->data, "define"))
+        dir_define(ctx);
+    else if (!strcmp(tmp->data, "undef"))
+        dir_undef(ctx);
+    else
+        pp_err("Unknown pre-prerocessing directive");
+
+    // Free directive name
+    free_token(tmp);
+}
+
 void preprocess(Io *io)
 {
     PpContext ctx = { .frames = NULL, .macros = NULL };
-    _Bool     first;
-    Token     *token;
+    Token     *tmp;
+    _Bool     newline;
 
     pp_push_file(&ctx, io);
 
-    for (first = 1;; first = 0) {
-        token = pp_next_expand(&ctx);
-        if (!token)
-            break;
-
-        if (token->type == TK_HASH) {
-            // Check if we need to recognize a directive
-            if (first || token->lnew) {
-                // Free hash
-                free_token(token);
-
-                // Directive name must be an identifier
-                token = pp_next_dir(&ctx);
-                if (!token || token->type != TK_IDENTIFIER)
-                    pp_err("Pre-processing directive must be an identifier");
-                // Check for all supported directives
-                if (!strcmp(token->data, "define"))
-                    dir_define(&ctx);
-                else if (!strcmp(token->data, "undef"))
-                    dir_undef(&ctx);
-                else
-                    pp_err("Unknown pre-prerocessing directive");
-
-                // Free directive name
-                free_token(token);
-                // Don't output anything after processing directive
-                continue;
-            }
+    newline = 1;
+    while ((tmp = pp_next_expand(&ctx))) {
+        if (newline && tmp->type == TK_HASH) {
+            handle_directive(&ctx);
+        } else {
+            newline = tmp->type == TK_END_LINE;
+            output_token(tmp);
         }
 
-        // We need to output the token here
-        output_token(token);
-        free_token(token);
+        free_token(tmp);
     }
 
     free_macros(ctx.macros);

@@ -19,7 +19,6 @@ int main(int argc, char *argv[])
     }
 
     preprocess(io);
-    putchar('\n');
 
     io_close(io);
     return 0;

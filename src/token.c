@@ -29,7 +29,6 @@ Token *dup_token(Token *other)
 
     token = calloc(1, sizeof *token);
     token->lwhite = other->lwhite;
-    token->lnew = other->lnew;
     token->no_expand = other->no_expand;
     token->type = other->type;
     if (other->data)
@@ -113,14 +112,13 @@ static void token_to_str(Token *token, VECc *buf, _Bool want_white)
 {
     char *str;
 
-    if (want_white) {
-        if (token->lnew)
-            VECc_add(buf, '\n');
-        else if (token->lwhite)
-            VECc_add(buf, ' ');
-    }
+    if (want_white && token->lwhite)
+        VECc_add(buf, ' ');
 
     switch (token->type) {
+    case TK_END_LINE:
+        VECc_add(buf, '\n');
+        break;
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
         VECc_addall(buf, token->data, strlen(token->data));
@@ -199,7 +197,6 @@ Token *glue(Token *left, Token *right)
     io = io_open_string(buf.arr);
     result = lex_next(io, 0);
     result->lwhite = left->lwhite;
-    result->lnew = left->lnew;
     // If there are more tokens, it means glue failed
     if (lex_next(io, 0))
         pp_err("Token concatenation must result in one token");

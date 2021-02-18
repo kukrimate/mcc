@@ -2,6 +2,9 @@
 #define TOKEN_H
 
 typedef enum {
+    // Terminators
+    TK_END_LINE,
+
     // Identifiers
     TK_HEADER_NAME,
     TK_IDENTIFIER,
@@ -69,7 +72,6 @@ typedef enum {
 typedef struct Token Token;
 struct Token {
     _Bool lwhite;    // Whitespace to the left
-    _Bool lnew;      // Newline to the left
     _Bool no_expand; // Token can't expand anymore
     TokenType type;  // Type of token
     char *data;      // String data from the lexer

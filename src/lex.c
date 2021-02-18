@@ -208,12 +208,12 @@ Token *lex_next(Io *io, _Bool want_header_name)
         goto retry;
     // End of file
     case EOF:
-        free(token);
+        free_token(token);
         return NULL;
     // End of line
     case '\n':
-        token->lnew = 1;
-        goto retry;
+        token->type = TK_END_LINE;
+        return token;
     // Line concatanation
     case '\\':
         if (io_next(io, '\n'))
@@ -320,8 +320,8 @@ Token *lex_next(Io *io, _Bool want_header_name)
     case '/':
         if (io_next(io, '/')) {                        // Line comment
             while (io_getc(io) != '\n');
-            token->lnew = 1;
-            goto retry;
+            token->type = TK_END_LINE;
+            return token;
         }
 
         if (io_next(io, '*')) {                        // Block comment

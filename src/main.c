@@ -1,25 +1,28 @@
 #include <stdio.h>
-#include "io.h"
 #include "token.h"
-#include "lex.h"
 #include "pp.h"
 
 int main(int argc, char *argv[])
 {
-    Io *io;
+    PpContext *ctx;
+    Token *tmp;
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s FILE\n", argv[0]);
         return 1;
     }
 
-    if (!(io = io_open(argv[1]))) {
+    ctx = pp_create(argv[1]);
+    if (!ctx) {
         perror(argv[1]);
         return 1;
     }
 
-    preprocess(io);
+    while ((tmp = pp_proc(ctx))) {
+        output_token(tmp);
+        free_token(tmp);
+    }
 
-    io_close(io);
+    pp_free(ctx);
     return 0;
 }

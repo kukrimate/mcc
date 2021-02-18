@@ -9,6 +9,7 @@
 #include "io.h"
 #include "lex.h"
 #include "err.h"
+#include "pp.h"
 
 typedef enum {
     R_GLUE,      // Glue operator
@@ -64,10 +65,14 @@ struct Frame {
 };
 
 // Preprocessor context
-typedef struct {
+struct PpContext {
+    // Preprocessor frames
     Frame *frames;
+    // Defined macros
     Macro *macros;
-} PpContext;
+    // Was the last token a newline
+    _Bool newline;
+};
 
 static Frame *new_frame(PpContext *ctx)
 {
@@ -79,11 +84,13 @@ static Frame *new_frame(PpContext *ctx)
 
 static void drop_frame(PpContext *ctx)
 {
-    Frame *cur;
+    Frame *tmp;
 
-    cur = ctx->frames;
-    ctx->frames = cur->next;
-    free(cur);
+    tmp = ctx->frames;
+    if (tmp->type == F_LEXER)
+        io_close(tmp->io);
+    ctx->frames = ctx->frames->next;
+    free(tmp);
 }
 
 void pp_push_file(PpContext *ctx, Io *io)
@@ -749,25 +756,53 @@ static void handle_directive(PpContext *ctx)
     free_token(tmp);
 }
 
-void preprocess(Io *io)
+PpContext *pp_create(const char *path)
 {
-    PpContext ctx = { .frames = NULL, .macros = NULL };
-    Token     *tmp;
-    _Bool     newline;
+    Io *io;
+    PpContext *ctx;
 
-    pp_push_file(&ctx, io);
+    // Open file
+    io = io_open(path);
+    if (!io)
+        return NULL;
 
-    newline = 1;
-    while ((tmp = pp_next_expand(&ctx))) {
-        if (newline && tmp->type == TK_HASH) {
-            handle_directive(&ctx);
-        } else {
-            newline = tmp->type == TK_END_LINE;
-            output_token(tmp);
-        }
+    // Create context
+    ctx = calloc(1, sizeof *ctx);
+    pp_push_file(ctx, io);
+    // First token eligible for directive recognition
+    ctx->newline = 1;
 
+    return ctx;
+}
+
+Token *pp_proc(PpContext *ctx)
+{
+    Token *tmp;
+    _Bool newline;
+
+next:
+    tmp = pp_next_expand(ctx);
+    if (!tmp)
+        return NULL;
+
+    if (ctx->newline && tmp->type == TK_HASH) {
+        handle_directive(ctx);
         free_token(tmp);
+        goto next;
+    } else {
+        newline = tmp->type == TK_END_LINE;
+        if (ctx->newline && newline) {
+            free_token(tmp);
+            goto next;
+        }
+        ctx->newline = newline;
     }
 
-    free_macros(ctx.macros);
+    return tmp;
+}
+
+void pp_free(PpContext *ctx)
+{
+    free_macros(ctx->macros);
+    free(ctx);
 }

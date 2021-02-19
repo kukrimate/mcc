@@ -1,6 +1,8 @@
 #include <stdio.h>
-#include "token.h"
-#include "pp.h"
+#include <stdlib.h>
+#include "err.h"
+#include "pp/token.h"
+#include "pp/pp.h"
 
 int main(int argc, char *argv[])
 {
@@ -20,7 +22,7 @@ int main(int argc, char *argv[])
 
     while ((tmp = pp_proc(ctx))) {
         output_token(tmp);
-        free_token(tmp);
+        free_tokens(tmp);
     }
 
     pp_free(ctx);

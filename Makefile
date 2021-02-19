@@ -1,7 +1,8 @@
-CFLAGS := -Ilibkm/src -std=c99 -D_GNU_SOURCE -Wall -Wextra -Wdeclaration-after-statement -g
+CFLAGS := -Ilibkm/src -Isrc -std=c99 -D_GNU_SOURCE -Wall -Wextra -Wdeclaration-after-statement -g
 
 MCC := mcc
-OBJ := src/io.o src/token.o src/lex.o src/pp.o src/main.o
+OBJ := src/pp/io.o src/pp/token.o src/pp/lex.o src/pp/pp.o \
+	   src/parse/parse.o src/main.o
 
 all: $(MCC)
 

@@ -153,7 +153,7 @@ static void escseq(int ch, Io *io, VECc *v)
         break;
     default:
         // Invalid escape sequence
-        pp_err("Invalid escape sequence");
+        mcc_err("Invalid escape sequence");
     }
 }
 #endif
@@ -179,7 +179,7 @@ static void func_name(int ch, Io *io, Token *token) \
         /* Unterminated literal */                  \
         case EOF:                                   \
         case '\n':                                  \
-            pp_err("Unterminated literal");         \
+            mcc_err("Unterminated literal");         \
         }                                           \
     }                                               \
 }
@@ -328,7 +328,7 @@ Token *lex_next(Io *io, _Bool want_header_name)
             for (;;) {
                 ch = io_getc(io);
                 if (ch == EOF)
-                    pp_err("Unterminated block comment");
+                    mcc_err("Unterminated block comment");
                 if (ch == '*' && io_next(io, '/')) {
                     token->lwhite = 1;
                     goto retry;
@@ -423,5 +423,5 @@ Token *lex_next(Io *io, _Bool want_header_name)
     }
 
     // Couldn't lex token
-    pp_err("Unlexable character");
+    mcc_err("Unlexable character");
 }

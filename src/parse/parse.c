@@ -87,7 +87,7 @@ void pp_num_to_const(Token *pp_num, Const *out)
     for (i = 0; i < ARRAY_SIZE(SUFFIXES); ++i) {
         if (!strcasecmp(SUFFIXES[i].str, cur)) {
             if (result > SUFFIXES[i].max) {
-                pp_err("Integer constant overflows its type");
+                mcc_err("Integer constant overflows its type");
             }
 
             out->type = SUFFIXES[i].type;
@@ -96,7 +96,7 @@ void pp_num_to_const(Token *pp_num, Const *out)
         }
     }
 
-    pp_err("Invalid character in integer constant");
+    mcc_err("Invalid character in integer constant");
 }
 
 static size_t parse_char_const(Token *char_const)

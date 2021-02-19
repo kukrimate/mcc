@@ -7,7 +7,7 @@
 #define NORETURN
 #endif
 
-static inline NORETURN void pp_err(const char *err)
+static inline NORETURN void mcc_err(const char *err)
 {
     fflush(stdout);
     fprintf(stderr, "\nPreprocessor error: %s\n", err);

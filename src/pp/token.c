@@ -199,7 +199,7 @@ Token *glue(Token *left, Token *right)
     result->lwhite = left->lwhite;
     // If there are more tokens, it means glue failed
     if (lex_next(io, 0))
-        pp_err("Token concatenation must result in one token");
+        mcc_err("Token concatenation must result in one token");
     // Free buffers
     io_close(io);
     VECc_free(&buf);

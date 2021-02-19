@@ -4,21 +4,18 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <vec.h>
+#include "lib/str.h"
 #include "io.h"
 #include "token.h"
 #include "lex.h"
 #include "err.h"
 
-VEC_GEN(char, c)
-
 static void identifier(int ch, Io *io, Token *token)
 {
-    VECc buf;
+    Str buf;
 
-    VECc_init(&buf);
-    VECc_add(&buf, ch);
+    Str_init(&buf);
+    Str_add(&buf, ch);
 
     for (;;)
         switch (io_peek(io)) {
@@ -26,22 +23,21 @@ static void identifier(int ch, Io *io, Token *token)
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            VECc_add(&buf, io_getc(io));
+            Str_add(&buf, io_getc(io));
             break;
         default:
-            VECc_add(&buf, 0);
             token->type = TK_IDENTIFIER;
-            token->data = buf.arr;
+            token->data = Str_str(&buf);
             return;
         }
 }
 
 static void pp_num(int ch, Io *io, Token *token)
 {
-    VECc buf;
+    Str buf;
 
-    VECc_init(&buf);
-    VECc_add(&buf, ch);
+    Str_init(&buf);
+    Str_add(&buf, ch);
 
     for (;;)
         switch (io_peek(io)) {
@@ -51,7 +47,7 @@ static void pp_num(int ch, Io *io, Token *token)
         case 'A' ... 'Z':
         case '0' ... '9':
             ch = io_getc(io);
-            VECc_add(&buf, ch);
+            Str_add(&buf, ch);
             switch (ch) {
             case 'e':
             case 'E':
@@ -60,20 +56,19 @@ static void pp_num(int ch, Io *io, Token *token)
                 switch (io_peek(io)) {
                 case '-':
                 case '+':
-                    VECc_add(&buf, io_getc(io));
+                    Str_add(&buf, io_getc(io));
                 }
             }
             break;
         default:
-            VECc_add(&buf, 0);
             token->type = TK_PP_NUMBER;
-            token->data = buf.arr;
+            token->data = Str_str(&buf);
             return;
         }
 }
 
 #if 0
-static void octal(int ch, Io *io, VECc *v)
+static void octal(int ch, Io *io, Str *v)
 {
     ch -= '0';
     // Octal constants allow 3 digits max
@@ -90,10 +85,10 @@ static void octal(int ch, Io *io, VECc *v)
         break;
     }
 endc:
-    VECc_add(v, ch);
+    Str_add(v, ch);
 }
 
-static void hexadecimal(int ch, Io *io, VECc *v)
+static void hexadecimal(int ch, Io *io, Str *v)
 {
     ch = 0;
     // Hex constants can be any length
@@ -112,38 +107,38 @@ static void hexadecimal(int ch, Io *io, VECc *v)
             goto endloop;
         }
 endloop:
-    VECc_add(v, ch);
+    Str_add(v, ch);
 }
 
-static void escseq(int ch, Io *io, VECc *v)
+static void escseq(int ch, Io *io, Str *v)
 {
     switch (ch = io_getc(io)) {
     case '\'':
     case '"':
     case '?':
     case '\\':
-        VECc_add(v, ch);
+        Str_add(v, ch);
         break;
     case 'a':
-        VECc_add(v, '\a');
+        Str_add(v, '\a');
         break;
     case 'b':
-        VECc_add(v, '\b');
+        Str_add(v, '\b');
         break;
     case 'f':
-        VECc_add(v, '\f');
+        Str_add(v, '\f');
         break;
     case 'n':
-        VECc_add(v, '\n');
+        Str_add(v, '\n');
         break;
     case 'r':
-        VECc_add(v, '\r');
+        Str_add(v, '\r');
         break;
     case 't':
-        VECc_add(v, '\t');
+        Str_add(v, '\t');
         break;
     case 'v':
-        VECc_add(v, '\v');
+        Str_add(v, '\v');
         break;
     case '0' ... '7':
         octal(ch, io, v);
@@ -161,25 +156,24 @@ static void escseq(int ch, Io *io, VECc *v)
 #define GEN_LITERAL(func_name, token_type, endch)   \
 static void func_name(int ch, Io *io, Token *token) \
 {                                                   \
-    VECc buf;                                       \
-    VECc_init(&buf);                                \
+    Str buf;                                        \
+    Str_init(&buf);                                 \
     for (;;) {                                      \
         ch = io_getc(io);                           \
         switch (ch) {                               \
         /* Normal character */                      \
         default:                                    \
-            VECc_add(&buf, ch);                     \
+            Str_add(&buf, ch);                      \
             break;                                  \
         /* End of literal */                        \
         case endch:                                 \
-            VECc_add(&buf, 0);                      \
             token->type = token_type;               \
-            token->data = buf.arr;                  \
+            token->data = Str_str(&buf);            \
             return;                                 \
         /* Unterminated literal */                  \
         case EOF:                                   \
         case '\n':                                  \
-            mcc_err("Unterminated literal");         \
+            mcc_err("Unterminated literal");        \
         }                                           \
     }                                               \
 }

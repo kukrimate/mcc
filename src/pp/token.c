@@ -5,13 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vec.h>
+#include "lib/str.h"
 #include "token.h"
 #include "io.h"
 #include "lex.h"
 #include "err.h"
-
-VEC_GEN(char, c)
 
 Token *create_token(TokenType type, char *data)
 {
@@ -108,72 +106,71 @@ static char *punctuator_str[] = {
     [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
-static void token_to_str(Token *token, VECc *buf, _Bool want_white)
+static void token_to_str(Token *token, Str *buf, _Bool want_white)
 {
     char *str;
 
     if (want_white && token->lwhite)
-        VECc_add(buf, ' ');
+        Str_add(buf, ' ');
 
     switch (token->type) {
     case TK_END_LINE:
-        VECc_add(buf, '\n');
+        Str_add(buf, '\n');
         break;
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
-        VECc_addall(buf, token->data, strlen(token->data));
+        Str_addall(buf, token->data, strlen(token->data));
         break;
     case TK_CHAR_CONST:
-        VECc_add(buf, '\'');
-        VECc_addall(buf, token->data, strlen(token->data));
-        VECc_add(buf, '\'');
+        Str_add(buf, '\'');
+        Str_addall(buf, token->data, strlen(token->data));
+        Str_add(buf, '\'');
         break;
     case TK_STRING_LIT:
-        VECc_add(buf, '\"');
-        VECc_addall(buf, token->data, strlen(token->data));
-        VECc_add(buf, '\"');
+        Str_add(buf, '\"');
+        Str_addall(buf, token->data, strlen(token->data));
+        Str_add(buf, '\"');
         break;
     default:
         str = punctuator_str[token->type];
-        VECc_addall(buf, str, strlen(str));
+        Str_addall(buf, str, strlen(str));
         break;
     }
 }
 
 void output_token(Token *token)
 {
-    VECc buf;
+    Str buf;
 
     // Init buffer
-    VECc_init(&buf);
+    Str_init(&buf);
     // Stringize token
     token_to_str(token, &buf, 1);
-    VECc_add(&buf, 0);
     // Print token
-    printf("%s", buf.arr);
+    printf("%s", Str_str(&buf));
     // Free buffer
-    VECc_free(&buf);
+    Str_free(&buf);
 }
 
 Token *stringize(Token *tokens)
 {
-    VECc   buf;
+    Str   buf;
 
     // Initialize buffer
-    VECc_init(&buf);
+    Str_init(&buf);
     // Stringize tokens one-by-one
     for (; tokens; tokens = tokens->next)
         token_to_str(tokens, &buf, 1);
     // Add NUL-terminator
-    VECc_add(&buf, 0);
+    Str_add(&buf, 0);
 
     // Create string literal token
-    return create_token(TK_STRING_LIT, buf.arr);
+    return create_token(TK_STRING_LIT, Str_str(&buf));
 }
 
 Token *glue(Token *left, Token *right)
 {
-    VECc  buf;
+    Str  buf;
     Io    *io;
     Token *result;
 
@@ -186,15 +183,14 @@ Token *glue(Token *left, Token *right)
         return dup_token(left);
 
     // Initialize buffer
-    VECc_init(&buf);
+    Str_init(&buf);
     // Stringize two tokens to buffer
     token_to_str(left, &buf, 0);
     token_to_str(right, &buf, 0);
     // Add NUL-terminator
-    VECc_add(&buf, 0);
 
     // Lex new buffer
-    io = io_open_string(buf.arr);
+    io = io_open_string(Str_str(&buf));
     result = lex_next(io, 0);
     result->lwhite = left->lwhite;
     // If there are more tokens, it means glue failed
@@ -202,7 +198,7 @@ Token *glue(Token *left, Token *right)
         mcc_err("Token concatenation must result in one token");
     // Free buffers
     io_close(io);
-    VECc_free(&buf);
+    Str_free(&buf);
 
     return result;
 }

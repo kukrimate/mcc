@@ -2,7 +2,7 @@ CFLAGS := -Isrc -std=c99 -D_GNU_SOURCE -Wall -Wextra -Wdeclaration-after-stateme
 
 MCC := mcc
 OBJ := src/lib/str.o src/pp/io.o src/pp/token.o src/pp/lex.o src/pp/pp.o \
-	   src/parse/parse.o src/main.o
+	   src/parse/node.o src/parse/parse.o src/main.o
 
 all: $(MCC)
 

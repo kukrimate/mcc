@@ -187,7 +187,6 @@ Token *glue(Token *left, Token *right)
     // Stringize two tokens to buffer
     token_to_str(left, &buf, 0);
     token_to_str(right, &buf, 0);
-    // Add NUL-terminator
 
     // Lex new buffer
     io = io_open_string(Str_str(&buf));

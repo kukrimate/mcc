@@ -384,24 +384,24 @@ Node *p_binary(ParseCtx *parse_ctx, Node *lhs, int min_precedence)
 {
     // Precedence table
     static int precedences[] = {
-        [ND_MUL    ] = 0, // * / %
-        [ND_DIV    ] = 0,
-        [ND_MOD    ] = 0,
-        [ND_ADD    ] = 1, // + -
-        [ND_SUB    ] = 1,
-        [ND_LSHIFT ] = 2, // << >>
-        [ND_RSHIFT ] = 2,
-        [ND_LESS   ] = 3, // <  > <= >=
-        [ND_MORE   ] = 3,
-        [ND_LESS_EQ] = 3,
-        [ND_MORE_EQ] = 3,
-        [ND_EQ     ] = 4, // ==, !=
-        [ND_NEQ    ] = 4,
-        [ND_AND    ] = 5, // &
-        [ND_XOR    ] = 6, // ^
-        [ND_OR     ] = 7, // |
-        [ND_LAND   ] = 8, // &&
-        [ND_LOR    ] = 9, // ||
+        [ND_MUL    ] = 9, // * / %
+        [ND_DIV    ] = 9,
+        [ND_MOD    ] = 9,
+        [ND_ADD    ] = 8, // + -
+        [ND_SUB    ] = 8,
+        [ND_LSHIFT ] = 7, // << >>
+        [ND_RSHIFT ] = 7,
+        [ND_LESS   ] = 6, // <  > <= >=
+        [ND_MORE   ] = 6,
+        [ND_LESS_EQ] = 6,
+        [ND_MORE_EQ] = 6,
+        [ND_EQ     ] = 5, // ==, !=
+        [ND_NEQ    ] = 5,
+        [ND_AND    ] = 4, // &
+        [ND_XOR    ] = 3, // ^
+        [ND_OR     ] = 2, // |
+        [ND_LAND   ] = 1, // &&
+        [ND_LOR    ] = 0, // ||
     };
 
     int op, op_next;
@@ -419,12 +419,11 @@ Node *p_binary(ParseCtx *parse_ctx, Node *lhs, int min_precedence)
         // Recurse on operators with greater precedence
         for (;;) {
             op_next = peek_bop(parse_ctx);
-            if (op_next < 0)
-                return create_binary(op, lhs, rhs);
-            if (precedences[op_next] <= precedences[op])
+            if (op_next < 0 || precedences[op_next] <= precedences[op])
                 break;
             rhs = p_binary(parse_ctx, rhs, precedences[op_next]);
         }
+        lhs = create_binary(op, lhs, rhs);
     }
 }
 

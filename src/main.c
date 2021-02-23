@@ -1,31 +1,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "err.h"
-#include "target.h"
 #include "pp/token.h"
-#include "pp/pp.h"
-#include "parse/parse.h"
+#include "pp/io.h"
+#include "pp/lex.h"
+#include "pp/cexpr.h"
 
 int main(int argc, char *argv[])
 {
-    PpContext *pp_ctx;
-    ParseCtx *parse_ctx;
+    Io *io;
+    Token *head, **tail;
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s FILE\n", argv[0]);
         return 1;
     }
 
-    pp_ctx = pp_create(argv[1]);
-    if (!pp_ctx) {
+    io = io_open(argv[1]);
+    if (!io) {
         perror(argv[1]);
         return 1;
     }
 
-    parse_ctx = parse_open(pp_ctx);
-    parse_run(parse_ctx);
+    head = NULL;
+    tail = &head;
+    while ((*tail = lex_next(io, 0))) {
+        if ((*tail)->type != TK_END_LINE)
+            tail = &(*tail)->next;
+        else
+            *tail = NULL;
+    }
 
-    parse_free(parse_ctx);
-    pp_free(pp_ctx);
+    printf("%ld\n", eval_cexpr(head));
+
+    io_close(io);
     return 0;
 }

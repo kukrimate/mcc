@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "lib/str.h"
+#include "str.h"
 #include "token.h"
 #include "io.h"
 #include "lex.h"

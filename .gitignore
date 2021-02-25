@@ -2,4 +2,4 @@
 doc
 # Binaries
 *.o
-mcc
+cpp

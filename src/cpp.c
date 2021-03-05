@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    while ((tmp = pp_proc(ctx))) {
+    while ((tmp = pp_expand(ctx))) {
         output_token(tmp);
         free_token(tmp);
     }

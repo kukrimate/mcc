@@ -206,8 +206,8 @@ Token *lex_next(Io *io, _Bool want_header_name)
         return NULL;
     // End of line
     case '\n':
-        token->type = TK_END_LINE;
-        return token;
+        token->lnew = 1;
+        goto retry;
     // Line concatanation
     case '\\':
         if (io_next(io, '\n'))
@@ -314,8 +314,8 @@ Token *lex_next(Io *io, _Bool want_header_name)
     case '/':
         if (io_next(io, '/')) {                        // Line comment
             while (io_getc(io) != '\n');
-            token->type = TK_END_LINE;
-            return token;
+            token->lnew = 1;
+            goto retry;
         }
 
         if (io_next(io, '*')) {                        // Block comment

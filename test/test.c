@@ -1,0 +1,4 @@
+
+#if defined bar
+
+#endif

@@ -10,6 +10,7 @@
 #include "lex.h"
 #include "err.h"
 #include "cexpr.h"
+#include "search.h"
 #include "pp.h"
 
 typedef enum {
@@ -82,6 +83,8 @@ struct Cond {
 
 // Preprocessor context
 struct PpContext {
+    // Enable header name mode?
+    _Bool header_name;
     // Preprocessor frames
     Frame *frames;
     // Defined macros
@@ -152,7 +155,7 @@ recurse:
             frame->prev = NULL;
         } else {
             // Read token directly from lexer
-            token = lex_next(frame->io, 0);
+            token = lex_next(frame->io, ctx->header_name);
             if (!token) {
                 // Remove frame
                 drop_frame(ctx);
@@ -203,7 +206,7 @@ recurse:
             token = frame->prev;
         } else {
             // Fill frame->prev if it doesn't exist
-            token = frame->prev = lex_next(frame->io, 0);
+            token = frame->prev = lex_next(frame->io, ctx->header_name);
             if (!token) {
                 // Peek at next frame
                 frame = frame->next;
@@ -811,7 +814,7 @@ static _Bool is_cexpr(PpContext *ctx)
     return eval_cexpr(head);
 
 err_defined:
-    mcc_err("Missing/malformed argument for defined opeartor");
+    mcc_err("Missing/malformed argument for defined operator");
 }
 
 // Skip till the next signficant conditional, if want_else_elif it can be either
@@ -914,6 +917,34 @@ static _Bool is_defined(PpContext *ctx)
     return find_macro(ctx, tmp);
 }
 
+// #include directive
+static void dir_include(PpContext *ctx)
+{
+    Token *hname;
+    Io    *io;
+
+    ctx->header_name = 1;
+    hname = pp_readline(ctx);
+    if (!hname)
+        mcc_err("Missing header name from #include");
+
+    switch (hname->type) {
+    case TK_HCHAR_LIT:
+        io = open_system_header(hname->data);
+        break;
+    case TK_QCHAR_LIT:
+        io = open_local_header(hname->data);
+        break;
+    default:
+        mcc_err("Invalid header name");
+        break;
+    }
+
+    if (!io)
+        mcc_err("Can't locate header file");
+    pp_push_file(ctx, io);
+}
+
 void handle_directive(PpContext *ctx)
 {
     Token *tmp;
@@ -945,6 +976,8 @@ void handle_directive(PpContext *ctx)
         dir_else(ctx);
     else if (!strcmp(tmp->data, "endif"))
         dir_endif(ctx);
+    else if (!strcmp(tmp->data, "include"))
+        dir_include(ctx);
     else
         mcc_err("Unknown pre-prerocessing directive");
 

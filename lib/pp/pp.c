@@ -791,9 +791,11 @@ static _Bool is_cexpr(PpContext *ctx)
                 *tail = create_token(TK_PP_NUMBER, strdup("0"));
 
             // Make sure we have right parenthesis if needed
-            tmp = pp_readline(ctx);
-            if (!tmp || tmp->type != TK_RIGHT_PAREN)
-                goto err_defined;
+            if (want_paren) {
+                tmp = pp_readline(ctx);
+                if (!tmp || tmp->type != TK_RIGHT_PAREN)
+                    goto err_defined;
+            }
         }
 
         tail = &(*tail)->next;
@@ -807,8 +809,12 @@ static _Bool is_cexpr(PpContext *ctx)
 
     head = NULL;
     tail = &head;
-    while ((*tail = pp_read(&subctx)))
+    while ((*tail = pp_read(&subctx))) {
+        // Replace un-replaced identifiers with 0
+        if ((*tail)->type == TK_IDENTIFIER)
+            *tail = create_token(TK_PP_NUMBER, strdup("0"));
         tail = &(*tail)->next;
+    }
 
     // Finally evaluate the expression
     return eval_cexpr(head);
@@ -927,6 +933,7 @@ static void dir_include(PpContext *ctx)
     hname = pp_readline(ctx);
     if (!hname)
         mcc_err("Missing header name from #include");
+    ctx->header_name = 0;
 
     switch (hname->type) {
     case TK_HCHAR_LIT:

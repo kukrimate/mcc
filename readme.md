@@ -6,8 +6,10 @@ Each stage so far is implemented as a (mostly) standalone library in `lib`
 with the driver program(s) in `src`.
 
 # project state
-So far most of the required pre-processor functionality is working and the
-parser is being worked on.
+The pre-processor is supposed to be fully working, obviously there are bugs to
+iron out. Simple program's pre-processed via mcc's preprocessor can compile with
+other compilers (glibc's headers mostly work). The parser is currently being worked
+on.
 
 # copying
 You probably can get a better compiler, under a less-restrictive license elsewhere.

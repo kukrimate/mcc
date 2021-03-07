@@ -9,6 +9,7 @@
 #include "io.h"
 #include "lex.h"
 #include "err.h"
+#include "cexpr.h"
 #include "pp.h"
 
 typedef enum {
@@ -66,12 +67,27 @@ struct Frame {
     Frame *next;
 };
 
+typedef enum {
+    C_IF,    // #if, #ifdef, or #ifndef
+    C_ELIF,  // #elif
+    C_ELSE,  // #else
+    C_ENDIF, // #endif
+} CondType;
+
+typedef struct Cond Cond;
+struct Cond {
+    CondType type;
+    Cond *next;
+};
+
 // Preprocessor context
 struct PpContext {
     // Preprocessor frames
     Frame *frames;
     // Defined macros
     Macro *macros;
+    // Conditional-inclusion stack
+    Cond  *conds;
 };
 
 static Frame *new_frame(PpContext *ctx)
@@ -291,6 +307,23 @@ static void del_macro(PpContext *ctx, Token *token)
             return;
         }
     }
+}
+
+static Cond *new_cond(PpContext *ctx, CondType type)
+{
+    Cond *cond = calloc(1, sizeof *cond);
+    cond->type = type;
+    cond->next = ctx->conds;
+    ctx->conds = cond;
+    return cond;
+}
+
+static Cond *pop_cond(PpContext *ctx)
+{
+    Cond *cond = ctx->conds;
+    if (cond)
+        ctx->conds = cond->next;
+    return cond;
 }
 
 static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
@@ -724,6 +757,163 @@ static void dir_undef(PpContext *ctx)
     free_token(tmp);
 }
 
+static _Bool is_cexpr(PpContext *ctx)
+{
+    Token     *head, **tail, *tmp;
+    _Bool     want_paren;
+    PpContext subctx;
+
+    // Capture constant expression
+    head = NULL;
+    tail = &head;
+
+    while ((*tail = pp_readline(ctx))) {
+        if ((*tail)->type == TK_IDENTIFIER
+                && !strcmp((*tail)->data, "defined")) {
+            // Check for left parenthesis
+            if (!(*tail = pp_readline(ctx)))
+                goto err_defined;
+            want_paren = (*tail)->type == TK_LEFT_PAREN;
+            if (want_paren && !(*tail = pp_readline(ctx)))
+                goto err_defined;
+
+            // Check macro name
+            if ((*tail)->type != TK_IDENTIFIER)
+                goto err_defined;
+
+            // Replace macro name with number
+            if (find_macro(ctx, *tail))
+                *tail = create_token(TK_PP_NUMBER, strdup("1"));
+            else
+                *tail = create_token(TK_PP_NUMBER, strdup("0"));
+
+            // Make sure we have right parenthesis if needed
+            tmp = pp_readline(ctx);
+            if (!tmp || tmp->type != TK_RIGHT_PAREN)
+                goto err_defined;
+        }
+
+        tail = &(*tail)->next;
+    }
+
+
+    // We need to macro expand the constant expression
+    subctx.frames = NULL;
+    subctx.macros = ctx->macros;
+    pp_push_list(&subctx, NULL, head);
+
+    head = NULL;
+    tail = &head;
+    while ((*tail = pp_read(&subctx)))
+        tail = &(*tail)->next;
+
+    // Finally evaluate the expression
+    return eval_cexpr(head);
+
+err_defined:
+    mcc_err("Missing/malformed argument for defined opeartor");
+}
+
+// Skip till the next signficant conditional, if want_else_elif it can be either
+// an elif, else, or endif, if not want_else_elif it can only be an endif
+static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
+{
+    size_t nest;
+    Token  *tmp;
+
+    nest = 1;
+    while (nest) {
+        tmp = pp_read(ctx);
+        if (!tmp)
+            goto err;
+
+        // Nested directive
+        if (tmp->type == TK_HASH && tmp->directive) {
+            // Read directive name
+            tmp = pp_read(ctx);
+            if (!tmp)
+                goto err;
+
+            // We don't care about empty or invalid directives here
+            if (tmp->lnew || tmp->type != TK_IDENTIFIER)
+                continue;
+
+            // Check for nested #else or #elif if at the correct nesting level
+            // and it is desired
+            if (nest == 1 && want_else_elif) {
+                if (!strcmp("else", tmp->data))
+                    return C_ELSE;
+                else if (!strcmp("elif", tmp->data))
+                    return C_ELIF;
+            }
+
+            // Check for nested #if directive
+            if (!strcmp("if", tmp->data))
+                ++nest;
+            else if (!strcmp("endif", tmp->data))
+                --nest;
+        }
+    }
+
+    // We got an #endif
+    return C_ENDIF;
+
+err:
+    mcc_err("Unterminated conditional inclusion");
+}
+
+// Handle #if directive
+static void dir_if(PpContext *ctx, _Bool eval, CondType type)
+{
+    Cond *cond = new_cond(ctx, type);
+again:
+    if (!eval)
+        switch (skip_cond(ctx, 1)) {
+        default:      // Not possible;
+            abort();
+        case C_ELSE:  // #else of skipped if always gets executed
+            cond->type = C_ELSE;
+            return;
+        case C_ELIF:  // Re-test condition on #elif
+            cond->type = C_ELIF;
+            eval = is_cexpr(ctx);
+            goto again;
+        case C_ENDIF: // #endif just pops the current conditional
+            free(pop_cond(ctx));
+            return;
+        }
+}
+
+static void dir_else(PpContext *ctx)
+{
+    // #else or #elif must come after an #if or #elif
+    Cond *prev = pop_cond(ctx);
+    if (!prev || !(prev->type == C_IF || prev->type == C_ELIF))
+        mcc_err("Unexpected #else or #elif");
+    free(prev);
+
+    // #else or #elif of an active #if just skips till #endif
+    skip_cond(ctx, 0);
+}
+
+static void dir_endif(PpContext *ctx)
+{
+    // #endif must be preceded by some other conditional
+    if (!pop_cond(ctx))
+        mcc_err("Unexpected #endif");
+}
+
+static _Bool is_defined(PpContext *ctx)
+{
+    Token *tmp;
+
+    tmp = pp_readline(ctx);
+    if (!tmp || tmp->type != TK_IDENTIFIER)
+        mcc_err("#if(n)def must be followed by a macro name");
+
+    return find_macro(ctx, tmp);
+}
+
 void handle_directive(PpContext *ctx)
 {
     Token *tmp;
@@ -743,6 +933,18 @@ void handle_directive(PpContext *ctx)
         dir_define(ctx);
     else if (!strcmp(tmp->data, "undef"))
         dir_undef(ctx);
+    else if (!strcmp(tmp->data, "if"))
+        dir_if(ctx, is_cexpr(ctx), C_IF);
+    else if (!strcmp(tmp->data, "ifdef"))
+        dir_if(ctx, is_defined(ctx), C_IF);
+    else if (!strcmp(tmp->data, "ifndef"))
+        dir_if(ctx, !is_defined(ctx), C_IF);
+    else if (!strcmp(tmp->data, "elif"))
+        dir_else(ctx);
+    else if (!strcmp(tmp->data, "else"))
+        dir_else(ctx);
+    else if (!strcmp(tmp->data, "endif"))
+        dir_endif(ctx);
     else
         mcc_err("Unknown pre-prerocessing directive");
 

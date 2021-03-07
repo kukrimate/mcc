@@ -207,7 +207,7 @@ static void literal_unesc(int ch, Io *io, Token *token, int endch, TokenType typ
     }
 }
 
-Token *lex_next(Io *io, _Bool want_header_name)
+Token *lex_next(Io *io, _Bool want_header_name, int *lineno)
 {
     Token *token;
     int ch;
@@ -230,12 +230,15 @@ Token *lex_next(Io *io, _Bool want_header_name)
         return NULL;
     // End of line
     case '\n':
+        ++*lineno;
         token->lnew = 1;
         goto retry;
     // Line concatanation
     case '\\':
-        if (io_next(io, '\n'))
+        if (io_next(io, '\n')) {
+            ++*lineno;
             goto retry;
+        }
         break;
     // Identifier
     case '_':
@@ -341,6 +344,7 @@ Token *lex_next(Io *io, _Bool want_header_name)
     case '/':
         if (io_next(io, '/')) {                        // Line comment
             while (io_getc(io) != '\n');
+            ++*lineno;
             token->lnew = 1;
             goto retry;
         }
@@ -350,6 +354,8 @@ Token *lex_next(Io *io, _Bool want_header_name)
                 ch = io_getc(io);
                 if (ch == EOF)
                     mcc_err("Unterminated block comment");
+                if (ch == '\n')
+                    ++*lineno;
                 if (ch == '*' && io_next(io, '/')) {
                     token->lwhite = 1;
                     goto retry;

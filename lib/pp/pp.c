@@ -55,8 +55,9 @@ struct Frame {
     union {
         // F_LEXER
         struct {
-            Io    *io;     // Token source
+            int   lineno;  // Current line number
             _Bool first;   // First token from this frame?
+            Io    *io;     // Token source
             Token *prev;   // For peeking
         };
         // F_LIST
@@ -118,6 +119,7 @@ void pp_push_file(PpContext *ctx, Io *io)
 
     frame = new_frame(ctx);
     frame->type = F_LEXER;
+    frame->lineno = 1;
     frame->first = 1;
     frame->io = io;
 }
@@ -155,7 +157,7 @@ recurse:
             frame->prev = NULL;
         } else {
             // Read token directly from lexer
-            token = lex_next(frame->io, ctx->header_name);
+            token = lex_next(frame->io, ctx->header_name, &frame->lineno);
             if (!token) {
                 // Remove frame
                 drop_frame(ctx);
@@ -206,7 +208,9 @@ recurse:
             token = frame->prev;
         } else {
             // Fill frame->prev if it doesn't exist
-            token = frame->prev = lex_next(frame->io, ctx->header_name);
+            token = frame->prev = lex_next(frame->io,
+                                           ctx->header_name,
+                                           &frame->lineno);
             if (!token) {
                 // Peek at next frame
                 frame = frame->next;
@@ -801,7 +805,6 @@ static _Bool is_cexpr(PpContext *ctx)
         tail = &(*tail)->next;
     }
 
-
     // We need to macro expand the constant expression
     subctx.frames = NULL;
     subctx.macros = ctx->macros;
@@ -809,7 +812,7 @@ static _Bool is_cexpr(PpContext *ctx)
 
     head = NULL;
     tail = &head;
-    while ((*tail = pp_read(&subctx))) {
+    while ((*tail = pp_expand(&subctx))) {
         // Replace un-replaced identifiers with 0
         if ((*tail)->type == TK_IDENTIFIER)
             *tail = create_token(TK_PP_NUMBER, strdup("0"));
@@ -857,7 +860,9 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
             }
 
             // Check for nested #if directive
-            if (!strcmp("if", tmp->data))
+            if (!strcmp("if", tmp->data)
+                    || !strcmp("ifdef", tmp->data)
+                    || !strcmp("ifndef", tmp->data))
                 ++nest;
             else if (!strcmp("endif", tmp->data))
                 --nest;
@@ -878,7 +883,7 @@ static void dir_if(PpContext *ctx, _Bool eval, CondType type)
 again:
     if (!eval)
         switch (skip_cond(ctx, 1)) {
-        default:      // Not possible;
+        default:      // Not possible
             abort();
         case C_ELSE:  // #else of skipped if always gets executed
             cond->type = C_ELSE;
@@ -908,8 +913,10 @@ static void dir_else(PpContext *ctx)
 static void dir_endif(PpContext *ctx)
 {
     // #endif must be preceded by some other conditional
-    if (!pop_cond(ctx))
+    if (!pop_cond(ctx)) {
+        printf("On line %d\n", ctx->frames->lineno);
         mcc_err("Unexpected #endif");
+    }
 }
 
 static _Bool is_defined(PpContext *ctx)

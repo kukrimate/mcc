@@ -10,6 +10,7 @@
 
 // System header directories
 static const char *system_header_dirs[] = {
+    "include",
     "/usr/include",
     "/usr/include/x86_64-linux-gnu",
     "/usr/local/include",
@@ -23,7 +24,6 @@ Io *open_system_header(const char *name)
 
     for (const char **dir = system_header_dirs; *dir; ++dir) {
         snprintf(path, sizeof path, "%s/%s", *dir, name);
-        printf("%s\n", path);
         if ((io = io_open(path)))
             return io;
     }

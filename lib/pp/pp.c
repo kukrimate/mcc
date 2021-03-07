@@ -500,6 +500,76 @@ static Token *pp_subst(PpContext *ctx, Macro *macro, Token **actuals)
 
 static void handle_directive(PpContext *ctx);
 
+// Pre-defined macros
+typedef struct {
+    // Identifier
+    const char *name;
+    // Handler function
+    void (*handle)(PpContext *ctx);
+} MccPredef;
+
+
+static void handle_date(PpContext *ctx)
+{
+    pp_push_list(ctx, NULL,
+        create_token(TK_PP_NUMBER, strdup("Mar  7 2021")));
+}
+
+
+static void handle_time(PpContext *ctx)
+{
+    pp_push_list(ctx, NULL,
+        create_token(TK_STRING_LIT, strdup("15:30:07")));
+}
+
+static void handle_file(PpContext *ctx)
+{
+    pp_push_list(ctx, NULL,
+        create_token(TK_STRING_LIT, "unknown"));
+}
+
+static void handle_line(PpContext *ctx)
+{
+    pp_push_list(ctx, NULL,
+        create_token(TK_STRING_LIT, strdup("1")));
+}
+
+static void handle_one(PpContext *ctx)
+{
+    pp_push_list(ctx, NULL,
+     create_token(TK_PP_NUMBER, strdup("1")));
+}
+
+static void handle_vers(PpContext *ctx)
+{
+    pp_push_list(ctx, NULL,
+     create_token(TK_PP_NUMBER, strdup("199901L")));
+}
+
+// Pre-defined macros
+static MccPredef predefs[] = {
+    // Required by ISO/IEC 9899:1999
+    { "__DATE__",         &handle_date },
+    { "__TIME__",         &handle_time },
+    { "__FILE__",         &handle_file },
+    { "__LINE__",         &handle_line },
+    { "__STDC__",         &handle_one  },
+    { "__STDC_HOSTED__",  &handle_one  },
+    { "__STDC_VERSION__", &handle_vers },
+    // These are needed to keep glibc happy
+    { "__x86_64__",       &handle_one  },
+    { "__amd64",          &handle_one  },
+    { "__amd64__",        &handle_one  },
+    { "__LP64__",         &handle_one  },
+    { "_LP64",            &handle_one  },
+    { "__ELF__",          &handle_one  },
+    { "__gnu_linux__",    &handle_one  },
+    { "__linux",          &handle_one  },
+    { "__linux__",        &handle_one  },
+    { "__unix",           &handle_one  },
+    { "__unix__",         &handle_one  },
+};
+
 Token *pp_expand(PpContext *ctx)
 {
     Token  *identifier, *lparen, *last, **actuals, *expansion;
@@ -525,6 +595,14 @@ recurse:
     // Return identifier if no macro expansion is required
     if (identifier->type != TK_IDENTIFIER || identifier->no_expand)
         return identifier;
+
+    // Check for pre-defined macro
+    for (i = 0; i < sizeof predefs / sizeof *predefs; ++i) {
+        if (!strcmp(predefs[i].name, identifier->data)) {
+            predefs[i].handle(ctx);
+            goto recurse;
+        }
+    }
 
     // See if the identifier is a macro name
     macro = find_macro(ctx, identifier);
@@ -764,6 +842,21 @@ static void dir_undef(PpContext *ctx)
     free_token(tmp);
 }
 
+static _Bool is_predef(Token *identifier)
+{
+    size_t i;
+
+    if (!identifier || identifier->type != TK_IDENTIFIER)
+        return 0;
+
+    for (i = 0; i < sizeof predefs / sizeof *predefs; ++i) {
+        if (!strcmp(predefs[i].name, identifier->data)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static _Bool is_cexpr(PpContext *ctx)
 {
     Token     *head, **tail, *tmp;
@@ -789,7 +882,7 @@ static _Bool is_cexpr(PpContext *ctx)
                 goto err_defined;
 
             // Replace macro name with number
-            if (find_macro(ctx, *tail))
+            if (is_predef(*tail) || find_macro(ctx, *tail))
                 *tail = create_token(TK_PP_NUMBER, strdup("1"));
             else
                 *tail = create_token(TK_PP_NUMBER, strdup("0"));
@@ -921,13 +1014,13 @@ static void dir_endif(PpContext *ctx)
 
 static _Bool is_defined(PpContext *ctx)
 {
-    Token *tmp;
+    Token  *tmp;
 
     tmp = pp_readline(ctx);
     if (!tmp || tmp->type != TK_IDENTIFIER)
         mcc_err("#if(n)def must be followed by a macro name");
 
-    return find_macro(ctx, tmp);
+    return is_predef(tmp) || find_macro(ctx, tmp);
 }
 
 // #include directive

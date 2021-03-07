@@ -29,3 +29,5 @@ a dup()obj
 EMPTY#define LOL xy
 
 LOL
+
+__DATE__

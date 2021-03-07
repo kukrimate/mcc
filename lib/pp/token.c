@@ -190,9 +190,10 @@ Token *stringize(Token *tokens)
 
 Token *glue(Token *left, Token *right)
 {
-    Str  buf;
+    Str   buf;
     Io    *io;
     Token *result;
+    int   lineno;
 
     // Placemarker handling
     if (left->type == TK_PLACEMARKER && right->type == TK_PLACEMARKER)
@@ -210,11 +211,12 @@ Token *glue(Token *left, Token *right)
 
     // Lex new buffer
     io = io_open_string(Str_str(&buf));
-    result = lex_next(io, 0);
+    lineno = 0;
+    result = lex_next(io, 0, &lineno);
     result->lnew = left->lnew;
     result->lwhite = left->lwhite;
     // If there are more tokens, it means glue failed
-    if (lex_next(io, 0))
+    if (lex_next(io, 0, &lineno))
         mcc_err("Token concatenation must result in one token");
     // Free buffers
     io_close(io);

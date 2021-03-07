@@ -816,7 +816,7 @@ static void dir_define(PpContext *ctx)
 
     // Check for macro type
     tmp = pp_peek(ctx);
-    if (tmp && tmp->type == TK_LEFT_PAREN) {
+    if (tmp && tmp->type == TK_LEFT_PAREN && !tmp->lwhite) {
         // Function like macro
         macro->function_like = 1;
         capture_formals(ctx, macro);

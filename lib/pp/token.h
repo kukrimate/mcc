@@ -2,8 +2,11 @@
 #define TOKEN_H
 
 typedef enum {
-    // Identifiers
-    TK_HEADER_NAME,
+    // Header names
+    TK_HCHAR_LIT,
+    TK_QCHAR_LIT,
+
+    // Identifier
     TK_IDENTIFIER,
 
     // Constants

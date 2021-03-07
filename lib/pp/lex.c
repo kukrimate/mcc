@@ -67,7 +67,6 @@ static void pp_num(int ch, Io *io, Token *token)
         }
 }
 
-#if 0
 static void octal(int ch, Io *io, Str *v)
 {
     ch -= '0';
@@ -151,37 +150,62 @@ static void escseq(int ch, Io *io, Str *v)
         mcc_err("Invalid escape sequence");
     }
 }
-#endif
 
-#define GEN_LITERAL(func_name, token_type, endch)   \
-static void func_name(int ch, Io *io, Token *token) \
-{                                                   \
-    Str buf;                                        \
-    Str_init(&buf);                                 \
-    for (;;) {                                      \
-        ch = io_getc(io);                           \
-        switch (ch) {                               \
-        /* Normal character */                      \
-        default:                                    \
-            Str_add(&buf, ch);                      \
-            break;                                  \
-        /* End of literal */                        \
-        case endch:                                 \
-            token->type = token_type;               \
-            token->data = Str_str(&buf);            \
-            return;                                 \
-        /* Unterminated literal */                  \
-        case EOF:                                   \
-        case '\n':                                  \
-            mcc_err("Unterminated literal");        \
-        }                                           \
-    }                                               \
+// Literal with escape sequences
+static void literal_esc(int ch, Io *io, Token *token, int endch, TokenType type)
+{
+    Str buf;
+    Str_init(&buf);
+    for (;;) {
+        ch = io_getc(io);
+        switch (ch) {
+        // Normal character
+        default:
+            // End of literal
+            if (ch == endch) {
+                token->type = type;
+                token->data = Str_str(&buf);
+                return;
+            }
+            Str_add(&buf, ch);
+            break;
+        // Escape sequence
+        case '\\':
+            escseq(ch, io, &buf);
+            break;
+        // Unterminated literal
+        case EOF:
+        case '\n':
+            mcc_err("Unterminated literal");
+        }
+    }
 }
 
-// Generate literal parsing functions
-GEN_LITERAL(string, TK_STRING_LIT, '\"')
-GEN_LITERAL(character, TK_CHAR_CONST, '\'')
-GEN_LITERAL(header_name, TK_HEADER_NAME, '>')
+// Literal without escape sequences
+static void literal_unesc(int ch, Io *io, Token *token, int endch, TokenType type)
+{
+    Str buf;
+    Str_init(&buf);
+    for (;;) {
+        ch = io_getc(io);
+        switch (ch) {
+        // Normal character
+        default:
+            // End of literal
+            if (ch == endch) {
+                token->type = type;
+                token->data = Str_str(&buf);
+                return;
+            }
+            Str_add(&buf, ch);
+            break;
+        // Unterminated literal
+        case EOF:
+        case '\n':
+            mcc_err("Unterminated literal");
+        }
+    }
+}
 
 Token *lex_next(Io *io, _Bool want_header_name)
 {
@@ -225,11 +249,14 @@ Token *lex_next(Io *io, _Bool want_header_name)
         return token;
     // Character constant
     case '\'':
-        character(ch, io, token);
+        literal_esc(ch, io, token, '\'', TK_CHAR_CONST);
         return token;
     // String literal
     case '\"':
-        string(ch, io, token);
+        if (want_header_name)
+            literal_unesc(ch, io, token, '\"', TK_QCHAR_LIT);
+        else
+            literal_esc(ch, io, token, '\"', TK_STRING_LIT);
         return token;
     // Punctuators
     case '[':
@@ -351,7 +378,7 @@ Token *lex_next(Io *io, _Bool want_header_name)
         return token;
     case '<':
         if (want_header_name) {                        // Header name
-            header_name(ch, io, token);
+            literal_unesc(ch, io, token, '>', TK_HCHAR_LIT);
             return token;
         }
 

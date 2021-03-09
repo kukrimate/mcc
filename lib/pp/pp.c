@@ -1109,6 +1109,23 @@ PpContext *pp_create(const char *path)
     return ctx;
 }
 
+PpContext *pp_create_string(const char *string)
+{
+    Io *io;
+    PpContext *ctx;
+
+    // Open I/O handle for string
+    io = io_open_string(string);
+    if (!io)
+        return NULL;
+
+    // Create context
+    ctx = calloc(1, sizeof *ctx);
+    pp_push_file(ctx, io);
+
+    return ctx;
+}
+
 void pp_free(PpContext *ctx)
 {
     free_macros(ctx->macros);

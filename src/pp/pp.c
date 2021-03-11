@@ -525,7 +525,7 @@ static void handle_time(PpContext *ctx)
 static void handle_file(PpContext *ctx)
 {
     pp_push_list(ctx, NULL,
-        create_token(TK_STRING_LIT, "unknown"));
+        create_token(TK_STRING_LIT, strdup("unknown")));
 }
 
 static void handle_line(PpContext *ctx)

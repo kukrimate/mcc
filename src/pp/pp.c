@@ -592,18 +592,21 @@ recurse:
         goto retry_free;
     }
 
-    // Return identifier if no macro expansion is required
-    if (identifier->type != TK_IDENTIFIER || identifier->no_expand)
+    // Only identifiers can expand (including pre-defined macros)
+    if (identifier->type != TK_IDENTIFIER)
         return identifier;
 
     // Check for pre-defined macro
     for (i = 0; i < sizeof predefs / sizeof *predefs; ++i) {
         if (!strcmp(predefs[i].name, identifier->data)) {
             predefs[i].handle(ctx);
-            goto recurse;
+            goto retry_inherit_space;
         }
     }
 
+    // Check if token has the no expand flag set
+    if (identifier->no_expand)
+        return identifier;
     // See if the identifier is a macro name
     macro = find_macro(ctx, identifier);
     if (!macro)
@@ -860,7 +863,7 @@ static _Bool is_predef(Token *identifier)
 static _Bool is_cexpr(PpContext *ctx)
 {
     Token     *head, **tail, *tmp;
-    _Bool     want_paren;
+    _Bool     want_paren, result;
     PpContext subctx;
 
     // Capture constant expression
@@ -870,19 +873,25 @@ static _Bool is_cexpr(PpContext *ctx)
     while ((*tail = pp_readline(ctx))) {
         if ((*tail)->type == TK_IDENTIFIER
                 && !strcmp((*tail)->data, "defined")) {
+            free_token(*tail);
             // Check for left parenthesis
             if (!(*tail = pp_readline(ctx)))
                 goto err_defined;
             want_paren = (*tail)->type == TK_LEFT_PAREN;
-            if (want_paren && !(*tail = pp_readline(ctx)))
-                goto err_defined;
+            if (want_paren) {
+                free_token(*tail);
+                if (!(*tail = pp_readline(ctx)))
+                    goto err_defined;
+            }
 
             // Check macro name
             if ((*tail)->type != TK_IDENTIFIER)
                 goto err_defined;
 
             // Replace macro name with number
-            if (is_predef(*tail) || find_macro(ctx, *tail))
+            result = is_predef(*tail) || find_macro(ctx, *tail);
+            free_token(*tail);
+            if (result)
                 *tail = create_token(TK_PP_NUMBER, strdup("1"));
             else
                 *tail = create_token(TK_PP_NUMBER, strdup("0"));
@@ -892,9 +901,9 @@ static _Bool is_cexpr(PpContext *ctx)
                 tmp = pp_readline(ctx);
                 if (!tmp || tmp->type != TK_RIGHT_PAREN)
                     goto err_defined;
+                free_token(tmp);
             }
         }
-
         tail = &(*tail)->next;
     }
 
@@ -907,13 +916,17 @@ static _Bool is_cexpr(PpContext *ctx)
     tail = &head;
     while ((*tail = pp_expand(&subctx))) {
         // Replace un-replaced identifiers with 0
-        if ((*tail)->type == TK_IDENTIFIER)
+        if ((*tail)->type == TK_IDENTIFIER) {
+            free_token(*tail);
             *tail = create_token(TK_PP_NUMBER, strdup("0"));
+        }
         tail = &(*tail)->next;
     }
 
     // Finally evaluate the expression
-    return eval_cexpr(head);
+    result = eval_cexpr(head);
+    free_tokens(head);
+    return result;
 
 err_defined:
     mcc_err("Missing/malformed argument for defined operator");
@@ -935,6 +948,7 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
         // Nested directive
         if (tmp->type == TK_HASH && tmp->directive) {
             // Read directive name
+            free_token(tmp);
             tmp = pp_read(ctx);
             if (!tmp)
                 goto err;
@@ -946,10 +960,15 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
             // Check for nested #else or #elif if at the correct nesting level
             // and it is desired
             if (nest == 1 && want_else_elif) {
-                if (!strcmp("else", tmp->data))
+                if (!strcmp("else", tmp->data)) {
+                    free_token(tmp);
                     return C_ELSE;
-                else if (!strcmp("elif", tmp->data))
+                }
+
+                if (!strcmp("elif", tmp->data)) {
+                    free_token(tmp);
                     return C_ELIF;
+                }
             }
 
             // Check for nested #if directive
@@ -960,6 +979,8 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
             else if (!strcmp("endif", tmp->data))
                 --nest;
         }
+
+        free_token(tmp);
     }
 
     // We got an #endif
@@ -1005,22 +1026,29 @@ static void dir_else(PpContext *ctx)
 
 static void dir_endif(PpContext *ctx)
 {
+    Cond *cond;
+
     // #endif must be preceded by some other conditional
-    if (!pop_cond(ctx)) {
+    cond = pop_cond(ctx);
+    if (!cond) {
         printf("On line %d\n", ctx->frames->lineno);
         mcc_err("Unexpected #endif");
     }
+    free(cond);
 }
 
 static _Bool is_defined(PpContext *ctx)
 {
-    Token  *tmp;
+    Token *tmp;
+    _Bool result;
 
     tmp = pp_readline(ctx);
     if (!tmp || tmp->type != TK_IDENTIFIER)
         mcc_err("#if(n)def must be followed by a macro name");
 
-    return is_predef(tmp) || find_macro(ctx, tmp);
+    result = is_predef(tmp) || find_macro(ctx, tmp);
+    free_token(tmp);
+    return result;
 }
 
 // #include directive
@@ -1046,6 +1074,7 @@ static void dir_include(PpContext *ctx)
         mcc_err("Invalid header name");
         break;
     }
+    free_token(hname);
 
     if (!io)
         mcc_err("Can't locate header file");
@@ -1057,7 +1086,6 @@ void handle_directive(PpContext *ctx)
     Token *tmp;
 
     tmp = pp_readline(ctx);
-
     // Check for empty directive
     if (!tmp)
         return;

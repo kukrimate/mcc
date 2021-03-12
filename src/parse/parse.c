@@ -126,7 +126,7 @@ static Node *convert_int_const(Token *pp_num)
         for (; *cur; ++cur)
             switch (*cur) {
             case '0' ... '9':
-                value = value * 10 | (*cur - '0');
+                value = value * 10 + (*cur - '0');
                 break;
             default:
                 goto end_value;
@@ -223,11 +223,14 @@ Node *p_primary(ParseCtx *ctx)
     switch (token->type) {
     case TK_PP_NUMBER:
         node = convert_int_const(token);
+        parse_eat(ctx);
         break;
     case TK_CHAR_CONST:
         node = convert_char_const(token);
+        parse_eat(ctx);
         break;
     case TK_LEFT_PAREN:
+        parse_eat(ctx);
         node = p_expression(ctx);
         if (!parse_match(ctx, TK_RIGHT_PAREN)) {
             mcc_err("Missing )");
@@ -237,7 +240,6 @@ Node *p_primary(ParseCtx *ctx)
         goto err;
     }
 
-    parse_eat(ctx);
     return node;
 
 err:
@@ -409,10 +411,14 @@ Node *p_assign(ParseCtx *ctx)
     Node *node;
     int aop;
 
+    // LHS
     node = p_cond(ctx);
+
+    // Assingment
     aop = peek_aop(ctx);
     if (aop < 0)
         return node;
+    parse_eat(ctx);
 
     return create_binary(aop, node, p_assign(ctx));
 }
@@ -425,7 +431,7 @@ Node *p_expression(ParseCtx *ctx)
     if (!parse_match(ctx, TK_COMMA))
         return node;
 
-    return create_binary(TK_COMMA, node, p_assign(ctx));
+    return create_binary(ND_COMMA, node, p_assign(ctx));
 }
 
 void dump_ast(Node *root);

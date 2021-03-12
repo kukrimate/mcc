@@ -64,7 +64,7 @@ static long read_number(Token *pp_num)
         for (; *cur; ++cur)
             switch (*cur) {
             case '0' ... '9':
-                value = value * 10 | (*cur - '0');
+                value = value * 10 + (*cur - '0');
                 break;
             default:
                 goto check_suf;

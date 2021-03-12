@@ -134,7 +134,7 @@ static void _dump_ast(Node *root, int depth)
         printf("(cast)\n");
         break;
     case ND_COND:
-        printf("*=\n");
+        printf("?:\n");
         break;
     case ND_COMMA:
         printf(",\n");

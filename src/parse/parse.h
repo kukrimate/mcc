@@ -17,9 +17,8 @@ typedef enum {
     // Unary opeartors
     ND_REF,     // &foo
     ND_DEREF,   // *foo
-    ND_POS,     // +
-    ND_NEG,     // -
-    ND_INV,     // ~
+    ND_MINUS,   // -
+    ND_BIT_INV, // ~
     ND_NOT,     // !
     // Binary operators
     ND_MUL,     // *
@@ -79,11 +78,8 @@ struct Node {
 // Parser context
 typedef struct ParseCtx ParseCtx;
 
-// Create a parser context, reading tokens from the pre-processor
-ParseCtx *parse_open(PpContext *pp_ctx);
-
-// Create a parser context, reading tokens from a list
-ParseCtx *parse_open_list(Token *head);
+// Create a parser context
+ParseCtx *parse_create(PpContext *pp);
 
 // Close a parser context
 void parse_free(ParseCtx *parse_ctx);

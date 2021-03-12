@@ -11,91 +11,50 @@
 #include "pp/pp.h"
 #include "parse.h"
 
-typedef enum {
-    SRC_PP,   // Preprocessor
-    SRC_LIST, // List
-} ParseSrc;
-
 struct ParseCtx {
-    ParseSrc src;
-    PpContext *pp_ctx;
-    Token *head;
+    // Pre-processor context
+    PpContext *pp;
+    // Current token
+    Token *cur;
 };
 
 // Create a parser context, reading tokens from the pre-processor
-ParseCtx *parse_open(PpContext *pp_ctx)
+ParseCtx *parse_create(PpContext *pp)
 {
-    ParseCtx *parse_ctx;
+    ParseCtx *ctx;
 
-    parse_ctx = calloc(1, sizeof *parse_ctx);
-    parse_ctx->src = SRC_PP;
-    parse_ctx->pp_ctx = pp_ctx;
-    parse_ctx->head = NULL;
-    return parse_ctx;
-}
-
-// Create a parser context, reading tokens from a list
-ParseCtx *parse_open_list(Token *head)
-{
-    ParseCtx *parse_ctx;
-
-    parse_ctx = calloc(1, sizeof *parse_ctx);
-    parse_ctx->src = SRC_LIST;
-    parse_ctx->head = head;
-    return parse_ctx;
+    ctx = calloc(1, sizeof *ctx);
+    ctx->pp = pp;
+    ctx->cur = pp_expand(pp);
+    return ctx;
 }
 
 // Free a parser context
-void parse_free(ParseCtx *parse_ctx)
+void parse_free(ParseCtx *ctx)
 {
-    free(parse_ctx);
+    free(ctx);
 }
 
-// Read the next token
-static Token *parse_read(ParseCtx *parse_ctx)
+// Advance to next token
+static void parse_advance(ParseCtx *ctx)
 {
-    Token *tmp;
-
-    switch (parse_ctx->src) {
-    case SRC_PP:
-        if (parse_ctx->head) {
-            tmp = parse_ctx->head;
-            parse_ctx->head = NULL;
-        } else {
-            tmp = pp_proc(parse_ctx->pp_ctx);
-        }
-        break;
-    case SRC_LIST:
-        tmp = parse_ctx->head;
-        if (tmp)
-            parse_ctx->head = parse_ctx->head->next;
-        break;
-    }
-    return tmp;
+    ctx->cur = pp_expand(ctx->pp);
 }
 
-// Peek at the next token
-static Token *parse_peek(ParseCtx *parse_ctx)
+// Read the current token
+static Token *parse_cur(ParseCtx *ctx)
 {
-    // Return token if we already got it
-    if (parse_ctx->head)
-        return parse_ctx->head;
-
-    // If we are reading from the pre-processor fill in token
-    if (parse_ctx->src == SRC_PP)
-        parse_ctx->head = pp_proc(parse_ctx->pp_ctx);
-
-    // Return token or NULL
-    return parse_ctx->head;
+    return ctx->cur;
 }
 
-static _Bool parse_match(ParseCtx *parse_ctx, TokenType type)
+static _Bool parse_match(ParseCtx *ctx, TokenType type)
 {
     Token *token;
 
-    token = parse_peek(parse_ctx);
+    token = parse_cur(ctx);
     if (token && token->type == type) {
-        free_token(parse_read(parse_ctx));
+        parse_advance(ctx);
+        free_token(token);
         return 1;
     }
     return 0;
@@ -163,21 +122,12 @@ static Node *convert_int_const(Token *pp_num)
             }
         break;
     }
-end_value:
-
-    // Determine type
-    // if (!strcmp(cur, "ull") || !strcmp(cur, "ULL") || !strcmp(cur, "llu") ||
-    //     !strcmp(cur, "LLU") || !strcmp(cur, "LLu") || !strcmp(cur, "llU") ||
-    //     !strcmp(cur, "uLL") || !strcmp(cur, "Ull"))
-
-
-    // Check for unexpected chars
-    if (*cur)
-        goto err;
+    end_value:
 
     return create_cosnt(value);
-err:
-    mcc_err("Invalid character in integer constant");
+
+// err:
+//     mcc_err("Invalid character in integer constant");
 }
 
 // Convert a character constant to an integer constant node
@@ -241,27 +191,21 @@ static Node *create_trinary(NodeType type, Node *child1, Node *child2, Node *chi
     return node;
 }
 
-// Print an AST
-static void dump_ast(Node *root)
-{
-
-}
-
 // Recursive descent parser
-static Node *p_primary(ParseCtx *parse_ctx);
-static Node *p_postfix(ParseCtx *parse_ctx);
-static Node *p_unary(ParseCtx *parse_ctx);
-static Node *p_binary(ParseCtx *parse_ctx, Node *lhs, int min_precedence);
-static Node *p_cond(ParseCtx *parse_ctx);
-static Node *p_assign(ParseCtx *parse_ctx);
-static Node *p_expression(ParseCtx *parse_ctx);
+static Node *p_primary(ParseCtx *ctx);
+static Node *p_postfix(ParseCtx *ctx);
+static Node *p_unary(ParseCtx *ctx);
+static Node *p_binary(ParseCtx *ctx, Node *lhs, int min_precedence);
+static Node *p_cond(ParseCtx *ctx);
+static Node *p_assign(ParseCtx *ctx);
+static Node *p_expression(ParseCtx *ctx);
 
-Node *p_primary(ParseCtx *parse_ctx)
+Node *p_primary(ParseCtx *ctx)
 {
     Node *node;
     Token *token;
 
-    token = parse_read(parse_ctx);
+    token = parse_cur(ctx);
     if (!token)
         goto err;
 
@@ -273,8 +217,8 @@ Node *p_primary(ParseCtx *parse_ctx)
         node = convert_char_const(token);
         break;
     case TK_LEFT_PAREN:
-        node = p_expression(parse_ctx);
-        if (!parse_match(parse_ctx, TK_RIGHT_PAREN)) {
+        node = p_expression(ctx);
+        if (!parse_match(ctx, TK_RIGHT_PAREN)) {
             mcc_err("Missing )");
         }
         break;
@@ -282,26 +226,27 @@ Node *p_primary(ParseCtx *parse_ctx)
         goto err;
     }
 
+    parse_advance(ctx);
     free_token(token);
     return node;
+
 err:
-    abort();
     mcc_err("Invalid primary expression");
 }
 
-Node *p_postfix(ParseCtx *parse_ctx)
+Node *p_postfix(ParseCtx *ctx)
 {
     Node *node;
 
-    node = p_primary(parse_ctx);
+    node = p_primary(ctx);
 
     for (;;) {
-        if (parse_match(parse_ctx, TK_PLUS_PLUS)) {
+        if (parse_match(ctx, TK_PLUS_PLUS)) {
             node = create_unary(ND_POST_INC, node);
             continue;
         }
 
-        if (parse_match(parse_ctx, TK_MINUS_MINUS)) {
+        if (parse_match(ctx, TK_MINUS_MINUS)) {
             node = create_unary(ND_POST_DEC, node);
             continue;
         }
@@ -310,42 +255,42 @@ Node *p_postfix(ParseCtx *parse_ctx)
     }
 }
 
-Node *p_unary(ParseCtx *parse_ctx)
+Node *p_unary(ParseCtx *ctx)
 {
     Node *node;
 
-    node = p_postfix(parse_ctx);
+    node = p_postfix(ctx);
 
     for (;;) {
-        if (parse_match(parse_ctx, TK_PLUS_PLUS)) {
+        if (parse_match(ctx, TK_PLUS_PLUS)) {
             node = create_unary(ND_PRE_INC, node);
             continue;
         }
-        if (parse_match(parse_ctx, TK_MINUS_MINUS)) {
+        if (parse_match(ctx, TK_MINUS_MINUS)) {
             node = create_unary(ND_PRE_DEC, node);
             continue;
         }
-        if (parse_match(parse_ctx, TK_AMPERSAND)) {
+        if (parse_match(ctx, TK_AMPERSAND)) {
             node = create_unary(ND_REF, node);
             continue;
         }
-        if (parse_match(parse_ctx, TK_STAR)) {
+        if (parse_match(ctx, TK_STAR)) {
             node = create_unary(ND_DEREF, node);
             continue;
         }
-        if (parse_match(parse_ctx, TK_PLUS)) {
-            node = create_unary(ND_POS, node);
+        if (parse_match(ctx, TK_PLUS)) {
+            // NOTE: we ignore unary +
             continue;
         }
-        if (parse_match(parse_ctx, TK_MINUS)) {
-            node = create_unary(ND_NEG, node);
+        if (parse_match(ctx, TK_MINUS)) {
+            node = create_unary(ND_MINUS, node);
             continue;
         }
-        if (parse_match(parse_ctx, TK_TILDE)) {
-            node = create_unary(ND_INV, node);
+        if (parse_match(ctx, TK_TILDE)) {
+            node = create_unary(ND_BIT_INV, node);
             continue;
         }
-        if (parse_match(parse_ctx, TK_EXCL_MARK)) {
+        if (parse_match(ctx, TK_EXCL_MARK)) {
             node = create_unary(ND_NOT, node);
             continue;
         }
@@ -353,9 +298,9 @@ Node *p_unary(ParseCtx *parse_ctx)
     }
 }
 
-static int peek_bop(ParseCtx *parse_ctx)
+static int peek_bop(ParseCtx *ctx)
 {
-    switch (parse_peek(parse_ctx)->type) {
+    switch (parse_cur(ctx)->type) {
     case TK_STAR:        return ND_MUL;
     case TK_FWD_SLASH:   return ND_DIV;
     case TK_PERCENT:     return ND_MOD;
@@ -380,8 +325,10 @@ static int peek_bop(ParseCtx *parse_ctx)
 
 // Unlike the rest of the parser which matches the standard,
 // we use an operator precedence parser for this
-Node *p_binary(ParseCtx *parse_ctx, Node *lhs, int min_precedence)
+Node *p_binary(ParseCtx *ctx, Node *lhs, int min_precedence)
 {
+    Token *token;
+
     // Precedence table
     static int precedences[] = {
         [ND_MUL    ] = 9, // * / %
@@ -409,44 +356,46 @@ Node *p_binary(ParseCtx *parse_ctx, Node *lhs, int min_precedence)
 
     for (;;) {
         // Read opeartor
-        op = peek_bop(parse_ctx);
+        op = peek_bop(ctx);
         if (op < 0 || precedences[op] < min_precedence)
             return lhs;
         // Eat token
-        free_token(parse_read(parse_ctx));
+        token = parse_cur(ctx);
+        parse_advance(ctx);
+        free_token(token);
         // Read RHS
-        rhs = p_unary(parse_ctx);
+        rhs = p_unary(ctx);
         // Recurse on operators with greater precedence
         for (;;) {
-            op_next = peek_bop(parse_ctx);
+            op_next = peek_bop(ctx);
             if (op_next < 0 || precedences[op_next] <= precedences[op])
                 break;
-            rhs = p_binary(parse_ctx, rhs, precedences[op_next]);
+            rhs = p_binary(ctx, rhs, precedences[op_next]);
         }
         lhs = create_binary(op, lhs, rhs);
     }
 }
 
-Node *p_cond(ParseCtx *parse_ctx)
+Node *p_cond(ParseCtx *ctx)
 {
     Node *n1, *n2;
 
-    n1 = p_binary(parse_ctx, p_unary(parse_ctx), 0);
+    n1 = p_binary(ctx, p_unary(ctx), 0);
 
-    if (!parse_match(parse_ctx, TK_QUEST_MARK))
+    if (!parse_match(ctx, TK_QUEST_MARK))
         return n1;
 
-    n2 = p_expression(parse_ctx);
+    n2 = p_expression(ctx);
 
-    if (!parse_match(parse_ctx, TK_COLON))
+    if (!parse_match(ctx, TK_COLON))
         mcc_err("Missing : from trinary conditional");
 
-    return create_trinary(ND_COND, n1, n2, p_cond(parse_ctx));
+    return create_trinary(ND_COND, n1, n2, p_cond(ctx));
 }
 
-static int peek_aop(ParseCtx *parse_ctx)
+static int peek_aop(ParseCtx *ctx)
 {
-    switch (parse_peek(parse_ctx)->type) {
+    switch (parse_cur(ctx)->type) {
     case TK_EQUAL:       return ND_ASSIGN;
     case TK_MUL_EQUAL:   return ND_AS_MUL;
     case TK_DIV_EQUAL:   return ND_AS_DIV;
@@ -462,33 +411,36 @@ static int peek_aop(ParseCtx *parse_ctx)
     }
 }
 
-Node *p_assign(ParseCtx *parse_ctx)
+Node *p_assign(ParseCtx *ctx)
 {
     Node *node;
     int aop;
 
-    node = p_cond(parse_ctx);
-    aop = peek_aop(parse_ctx);
+    node = p_cond(ctx);
+    aop = peek_aop(ctx);
     if (aop < 0)
         return node;
 
-    return create_binary(aop, node, p_assign(parse_ctx));
+    return create_binary(aop, node, p_assign(ctx));
 }
 
-Node *p_expression(ParseCtx *parse_ctx)
+Node *p_expression(ParseCtx *ctx)
 {
     Node *node;
 
-    node = p_assign(parse_ctx);
-    if (!parse_match(parse_ctx, TK_COMMA))
+    node = p_assign(ctx);
+    if (!parse_match(ctx, TK_COMMA))
         return node;
 
-    return create_binary(TK_COMMA, node, p_assign(parse_ctx));
+    return create_binary(TK_COMMA, node, p_assign(ctx));
 }
 
-void parse_run(ParseCtx *parse_ctx)
+void dump_ast(Node *root);
+
+void parse_run(ParseCtx *ctx)
 {
     Node *root;
 
-    root = p_expression(parse_ctx);
+    root = p_expression(ctx);
+    dump_ast(root);
 }

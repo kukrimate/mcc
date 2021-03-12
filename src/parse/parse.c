@@ -431,7 +431,7 @@ Node *p_expression(ParseCtx *ctx)
     if (!parse_match(ctx, TK_COMMA))
         return node;
 
-    return create_binary(ND_COMMA, node, p_assign(ctx));
+    return create_binary(ND_COMMA, node, p_expression(ctx));
 }
 
 void dump_ast(Node *root);

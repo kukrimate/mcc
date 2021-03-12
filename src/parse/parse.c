@@ -35,18 +35,29 @@ void parse_free(ParseCtx *ctx)
     free(ctx);
 }
 
-// Advance to next token
-static void parse_advance(ParseCtx *ctx)
-{
-    ctx->cur = pp_expand(ctx->pp);
-}
-
 // Read the current token
 static Token *parse_cur(ParseCtx *ctx)
 {
     return ctx->cur;
 }
 
+// Advance to next token
+static void parse_advance(ParseCtx *ctx)
+{
+    ctx->cur = pp_expand(ctx->pp);
+}
+
+// Like advance but also free
+static void parse_eat(ParseCtx *ctx)
+{
+    Token *token;
+
+    token = parse_cur(ctx);
+    parse_advance(ctx);
+    free_token(token);
+}
+
+// Match token and than eat if matched
 static _Bool parse_match(ParseCtx *ctx, TokenType type)
 {
     Token *token;
@@ -60,7 +71,7 @@ static _Bool parse_match(ParseCtx *ctx, TokenType type)
     return 0;
 }
 
-static Node *create_cosnt(t_umax value)
+static Node *create_const(t_umax value)
 {
     Node   *node;
 
@@ -124,7 +135,7 @@ static Node *convert_int_const(Token *pp_num)
     }
     end_value:
 
-    return create_cosnt(value);
+    return create_const(value);
 
 // err:
 //     mcc_err("Invalid character in integer constant");
@@ -226,8 +237,7 @@ Node *p_primary(ParseCtx *ctx)
         goto err;
     }
 
-    parse_advance(ctx);
-    free_token(token);
+    parse_eat(ctx);
     return node;
 
 err:
@@ -257,50 +267,32 @@ Node *p_postfix(ParseCtx *ctx)
 
 Node *p_unary(ParseCtx *ctx)
 {
-    Node *node;
-
-    node = p_postfix(ctx);
-
-    for (;;) {
-        if (parse_match(ctx, TK_PLUS_PLUS)) {
-            node = create_unary(ND_PRE_INC, node);
-            continue;
-        }
-        if (parse_match(ctx, TK_MINUS_MINUS)) {
-            node = create_unary(ND_PRE_DEC, node);
-            continue;
-        }
-        if (parse_match(ctx, TK_AMPERSAND)) {
-            node = create_unary(ND_REF, node);
-            continue;
-        }
-        if (parse_match(ctx, TK_STAR)) {
-            node = create_unary(ND_DEREF, node);
-            continue;
-        }
-        if (parse_match(ctx, TK_PLUS)) {
-            // NOTE: we ignore unary +
-            continue;
-        }
-        if (parse_match(ctx, TK_MINUS)) {
-            node = create_unary(ND_MINUS, node);
-            continue;
-        }
-        if (parse_match(ctx, TK_TILDE)) {
-            node = create_unary(ND_BIT_INV, node);
-            continue;
-        }
-        if (parse_match(ctx, TK_EXCL_MARK)) {
-            node = create_unary(ND_NOT, node);
-            continue;
-        }
-        return node;
-    }
+    if (parse_match(ctx, TK_PLUS_PLUS))
+        return create_unary(ND_PRE_INC, p_unary(ctx));
+    if (parse_match(ctx, TK_MINUS_MINUS))
+        return create_unary(ND_PRE_DEC, p_unary(ctx));
+    if (parse_match(ctx, TK_AMPERSAND))
+        return create_unary(ND_REF, p_unary(ctx));
+    if (parse_match(ctx, TK_STAR))
+        return create_unary(ND_DEREF, p_unary(ctx));
+    if (parse_match(ctx, TK_PLUS)) // NOTE: we don't reflext unary + in the AST
+        return p_unary(ctx);
+    if (parse_match(ctx, TK_MINUS))
+        return create_unary(ND_MINUS, p_unary(ctx));
+    if (parse_match(ctx, TK_TILDE))
+        return create_unary(ND_BIT_INV, p_unary(ctx));
+    if (parse_match(ctx, TK_EXCL_MARK))
+        return create_unary(ND_NOT, p_unary(ctx));
+    return p_postfix(ctx);
 }
-
 static int peek_bop(ParseCtx *ctx)
 {
-    switch (parse_cur(ctx)->type) {
+    Token *token;
+
+    token = parse_cur(ctx);
+    if (!token)
+        return -1;
+    switch (token->type) {
     case TK_STAR:        return ND_MUL;
     case TK_FWD_SLASH:   return ND_DIV;
     case TK_PERCENT:     return ND_MOD;
@@ -327,8 +319,6 @@ static int peek_bop(ParseCtx *ctx)
 // we use an operator precedence parser for this
 Node *p_binary(ParseCtx *ctx, Node *lhs, int min_precedence)
 {
-    Token *token;
-
     // Precedence table
     static int precedences[] = {
         [ND_MUL    ] = 9, // * / %
@@ -360,9 +350,7 @@ Node *p_binary(ParseCtx *ctx, Node *lhs, int min_precedence)
         if (op < 0 || precedences[op] < min_precedence)
             return lhs;
         // Eat token
-        token = parse_cur(ctx);
-        parse_advance(ctx);
-        free_token(token);
+        parse_eat(ctx);
         // Read RHS
         rhs = p_unary(ctx);
         // Recurse on operators with greater precedence
@@ -395,7 +383,12 @@ Node *p_cond(ParseCtx *ctx)
 
 static int peek_aop(ParseCtx *ctx)
 {
-    switch (parse_cur(ctx)->type) {
+    Token *token;
+
+    token = parse_cur(ctx);
+    if (!token)
+        return -1;
+    switch (token->type) {
     case TK_EQUAL:       return ND_ASSIGN;
     case TK_MUL_EQUAL:   return ND_AS_MUL;
     case TK_DIV_EQUAL:   return ND_AS_DIV;

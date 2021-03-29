@@ -9,6 +9,8 @@
 #include "target.h"
 #include "pp/token.h"
 #include "pp/pp.h"
+#include "type.h"
+#include "target.h"
 #include "parse.h"
 
 struct ParseCtx {
@@ -202,7 +204,7 @@ static Node *create_trinary(NodeType type, Node *child1, Node *child2, Node *chi
     return node;
 }
 
-// Recursive descent parser
+// Expression parser
 static Node *p_primary(ParseCtx *ctx);
 static Node *p_postfix(ParseCtx *ctx);
 static Node *p_unary(ParseCtx *ctx);
@@ -434,12 +436,39 @@ Node *p_expression(ParseCtx *ctx)
     return create_binary(ND_COMMA, node, p_expression(ctx));
 }
 
+// Declaration parser
+static Node *p_declaration(ParseCtx *ctx);
+
+struct foo {
+    char a;
+    char b;
+};
+
+Node *p_declaration(ParseCtx *ctx)
+{
+    struct foo *f;
+    int *p;
+
+    f = &(struct foo) {
+        .a = 'a',
+        .b = 'b',
+    };
+
+    p = (int[]) {
+        [6] = 6,
+        [8] = 8,
+    };
+
+    printf("%p %p\n", f, p);
+}
+
 void dump_ast(Node *root);
 
 void parse_run(ParseCtx *ctx)
 {
     Node *root;
 
-    root = p_expression(ctx);
-    dump_ast(root);
+    root = p_declaration(ctx);
+    root = p_declaration(ctx);
+    // dump_ast(root);
 }

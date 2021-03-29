@@ -1,14 +1,14 @@
-CFLAGS := -Isrc -std=c99 -D_GNU_SOURCE -Wall -Wextra -Wdeclaration-after-statement -g
+CFLAGS := -Isrc -std=c99 -D_GNU_SOURCE -Wall -Wextra -g -O2
 
 # Library objects
-LIB_OBJ := src/lib/str.o
+LIB_OBJ := src/lib/str.o src/lib/hash.o
 
 # Preprocessor objects
 PP_OBJ := src/pp/io.o src/pp/token.o src/pp/lex.o \
 		  src/pp/cexpr.o src/pp/search.o src/pp/pp.o
 
 # Parser objects
-PARSE_OBJ := src/parse/parse.o src/parse/dump.o
+PARSE_OBJ := src/parse/parse.o src/parse/dump.o src/parse/type.o
 
 # Standalone pre-processor
 CPP_BIN := cpp

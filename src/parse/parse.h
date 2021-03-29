@@ -1,16 +1,6 @@
 #ifndef PARSE_H
 #define PARSE_H
 
-// Constant type
-// enum {
-//     CT_INT,
-//     CT_UINT,
-//     CT_LONG,
-//     CT_ULONG,
-//     CT_LLONG,
-//     CT_ULLONG,
-// };
-
 typedef enum {
     // Constant
     ND_CONST,

@@ -3,3 +3,4 @@ doc
 # Binaries
 *.o
 cpp
+mcc

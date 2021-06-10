@@ -25,10 +25,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // Read then output all tokens from the pre-processor
     while ((tmp = pp_expand(ctx))) {
         output_token(tmp);
         free_token(tmp);
     }
+
+    // Output a newline after the last token
+    putchar('\n');
 
     pp_free(ctx);
 }

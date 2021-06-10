@@ -73,8 +73,8 @@ typedef enum {
 // Token type
 typedef struct Token Token;
 struct Token {
-    _Bool lwhite;    // Whitespace to the left
-    _Bool lnew;      // Newline to the left
+    _Bool lwhite;    // # of whitespace to the left
+    _Bool lnew;      // # of newline to the left
     _Bool directive; // Was this token at the beginning of a line
     _Bool no_expand; // Token can't expand anymore
     TokenType type;  // Type of token

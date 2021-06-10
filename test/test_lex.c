@@ -15,42 +15,33 @@
 
 static void assert_next_type(Io *io, TokenType type)
 {
-    int lineno;
     Token *tmp;
 
-    lineno = 0;
-    tmp = lex_next(io, 0, &lineno);
+    tmp = lex_next(io, 0);
     assert(tmp && tmp->type == type);
     free_token(tmp);
 }
 
 static void assert_next_data(Io *io, TokenType type, const char *data)
 {
-    int lineno;
     Token *tmp;
 
-    lineno = 0;
-    tmp = lex_next(io, 0, &lineno);
+    tmp = lex_next(io, 0);
     assert(tmp && tmp->type == type && !strcmp(tmp->data, data));
     free_token(tmp);
 }
 
 static void assert_next_space(Io *io, _Bool lnew, _Bool lwhite)
 {
-    int lineno;
     Token *tmp;
 
-    lineno = 0;
-    tmp = lex_next(io, 0, &lineno);
+    tmp = lex_next(io, 0);
     assert(tmp && tmp->lnew == lnew && tmp->lwhite == lwhite);
 }
 
 static void assert_next_null(Io *io)
 {
-    int lineno;
-
-    lineno = 0;
-    assert(!lex_next(io, 0, &lineno));
+    assert(!lex_next(io, 0));
 }
 
 // Test pre-processing numbers

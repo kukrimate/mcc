@@ -5,8 +5,7 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <lib/str.h>
+#include <lib/vec.h>
 #include "io.h"
 #include "token.h"
 #include "lex.h"
@@ -14,10 +13,10 @@
 
 static void identifier(int ch, Io *io, Token *token)
 {
-    Str buf;
+    Vec_char buf;
 
-    Str_init(&buf);
-    Str_add(&buf, ch);
+    vec_char_init(&buf);
+    vec_char_add(&buf, ch);
 
     for (;;)
         switch (io_peek(io)) {
@@ -25,21 +24,21 @@ static void identifier(int ch, Io *io, Token *token)
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            Str_add(&buf, io_getc(io));
+            vec_char_add(&buf, io_getc(io));
             break;
         default:
             token->type = TK_IDENTIFIER;
-            token->data = Str_str(&buf);
+            token->data = vec_char_str(&buf);
             return;
         }
 }
 
 static void pp_num(int ch, Io *io, Token *token)
 {
-    Str buf;
+    Vec_char buf;
 
-    Str_init(&buf);
-    Str_add(&buf, ch);
+    vec_char_init(&buf);
+    vec_char_add(&buf, ch);
 
     for (;;)
         switch (io_peek(io)) {
@@ -49,7 +48,7 @@ static void pp_num(int ch, Io *io, Token *token)
         case 'A' ... 'Z':
         case '0' ... '9':
             ch = io_getc(io);
-            Str_add(&buf, ch);
+            vec_char_add(&buf, ch);
             switch (ch) {
             case 'e':
             case 'E':
@@ -58,18 +57,18 @@ static void pp_num(int ch, Io *io, Token *token)
                 switch (io_peek(io)) {
                 case '-':
                 case '+':
-                    Str_add(&buf, io_getc(io));
+                    vec_char_add(&buf, io_getc(io));
                 }
             }
             break;
         default:
             token->type = TK_PP_NUMBER;
-            token->data = Str_str(&buf);
+            token->data = vec_char_str(&buf);
             return;
         }
 }
 
-static void octal(int ch, Io *io, Str *v)
+static void octal(int ch, Io *io, Vec_char *v)
 {
     ch -= '0';
     // Octal constants allow 3 digits max
@@ -86,10 +85,10 @@ static void octal(int ch, Io *io, Str *v)
         break;
     }
 endc:
-    Str_add(v, ch);
+    vec_char_add(v, ch);
 }
 
-static void hexadecimal(int ch, Io *io, Str *v)
+static void hexadecimal(int ch, Io *io, Vec_char *v)
 {
     ch = 0;
     // Hex constants can be any length
@@ -108,38 +107,38 @@ static void hexadecimal(int ch, Io *io, Str *v)
             goto endloop;
         }
 endloop:
-    Str_add(v, ch);
+    vec_char_add(v, ch);
 }
 
-static void escseq(int ch, Io *io, Str *v)
+static void escseq(int ch, Io *io, Vec_char *v)
 {
     switch (ch = io_getc(io)) {
     case '\'':
     case '"':
     case '?':
     case '\\':
-        Str_add(v, ch);
+        vec_char_add(v, ch);
         break;
     case 'a':
-        Str_add(v, '\a');
+        vec_char_add(v, '\a');
         break;
     case 'b':
-        Str_add(v, '\b');
+        vec_char_add(v, '\b');
         break;
     case 'f':
-        Str_add(v, '\f');
+        vec_char_add(v, '\f');
         break;
     case 'n':
-        Str_add(v, '\n');
+        vec_char_add(v, '\n');
         break;
     case 'r':
-        Str_add(v, '\r');
+        vec_char_add(v, '\r');
         break;
     case 't':
-        Str_add(v, '\t');
+        vec_char_add(v, '\t');
         break;
     case 'v':
-        Str_add(v, '\v');
+        vec_char_add(v, '\v');
         break;
     case '0' ... '7':
         octal(ch, io, v);
@@ -156,8 +155,8 @@ static void escseq(int ch, Io *io, Str *v)
 // Literal with escape sequences
 static void literal_esc(int ch, Io *io, Token *token, int endch, TokenType type)
 {
-    Str buf;
-    Str_init(&buf);
+    Vec_char buf;
+    vec_char_init(&buf);
     for (;;) {
         ch = io_getc(io);
         switch (ch) {
@@ -166,10 +165,10 @@ static void literal_esc(int ch, Io *io, Token *token, int endch, TokenType type)
             // End of literal
             if (ch == endch) {
                 token->type = type;
-                token->data = Str_str(&buf);
+                token->data = vec_char_str(&buf);
                 return;
             }
-            Str_add(&buf, ch);
+            vec_char_add(&buf, ch);
             break;
         // Escape sequence
         case '\\':
@@ -186,8 +185,8 @@ static void literal_esc(int ch, Io *io, Token *token, int endch, TokenType type)
 // Literal without escape sequences
 static void literal_unesc(int ch, Io *io, Token *token, int endch, TokenType type)
 {
-    Str buf;
-    Str_init(&buf);
+    Vec_char buf;
+    vec_char_init(&buf);
     for (;;) {
         ch = io_getc(io);
         switch (ch) {
@@ -196,10 +195,10 @@ static void literal_unesc(int ch, Io *io, Token *token, int endch, TokenType typ
             // End of literal
             if (ch == endch) {
                 token->type = type;
-                token->data = Str_str(&buf);
+                token->data = vec_char_str(&buf);
                 return;
             }
-            Str_add(&buf, ch);
+            vec_char_add(&buf, ch);
             break;
         // Unterminated literal
         case EOF:
@@ -209,7 +208,7 @@ static void literal_unesc(int ch, Io *io, Token *token, int endch, TokenType typ
     }
 }
 
-Token *lex_next(Io *io, _Bool want_header_name, int *lineno)
+Token *lex_next(Io *io, _Bool want_header_name)
 {
     Token *token;
     int ch;
@@ -218,10 +217,12 @@ Token *lex_next(Io *io, _Bool want_header_name, int *lineno)
 
     retry:
     switch ((ch = io_getc(io))) {
-    // Whitespace
+    // Invisible whitespaces (carriage return, form feed, vertical tab)
     case '\r':
     case '\f':
     case '\v':
+        goto retry;
+    // Visible whitespaces (tabs, spaces)
     case '\t':
     case ' ':
         token->lwhite = 1;
@@ -232,15 +233,13 @@ Token *lex_next(Io *io, _Bool want_header_name, int *lineno)
         return NULL;
     // End of line
     case '\n':
-        ++*lineno;
+        token->lwhite = 0;
         token->lnew = 1;
         goto retry;
     // Line concatanation
     case '\\':
-        if (io_next(io, '\n')) {
-            ++*lineno;
+        if (io_next(io, '\n'))
             goto retry;
-        }
         break;
     // Identifier
     case '_':
@@ -346,7 +345,7 @@ Token *lex_next(Io *io, _Bool want_header_name, int *lineno)
     case '/':
         if (io_next(io, '/')) {                        // Line comment
             while (io_getc(io) != '\n');
-            ++*lineno;
+            token->lwhite = 0;
             token->lnew = 1;
             goto retry;
         }
@@ -356,8 +355,6 @@ Token *lex_next(Io *io, _Bool want_header_name, int *lineno)
                 ch = io_getc(io);
                 if (ch == EOF)
                     mcc_err("Unterminated block comment");
-                if (ch == '\n')
-                    ++*lineno;
                 if (ch == '*' && io_next(io, '/')) {
                     token->lwhite = 1;
                     goto retry;

@@ -57,7 +57,6 @@ struct Frame {
     union {
         // F_LEXER
         struct {
-            int   lineno;  // Current line number
             _Bool first;   // First token from this frame?
             Io    *io;     // Token source
             Token *prev;   // For peeking
@@ -121,7 +120,6 @@ void pp_push_file(PpContext *ctx, Io *io)
 
     frame = new_frame(ctx);
     frame->type = F_LEXER;
-    frame->lineno = 1;
     frame->first = 1;
     frame->io = io;
 }
@@ -159,7 +157,7 @@ recurse:
             frame->prev = NULL;
         } else {
             // Read token directly from lexer
-            token = lex_next(frame->io, ctx->header_name, &frame->lineno);
+            token = lex_next(frame->io, ctx->header_name);
             if (!token) {
                 // Remove frame
                 drop_frame(ctx);
@@ -210,9 +208,7 @@ recurse:
             token = frame->prev;
         } else {
             // Fill frame->prev if it doesn't exist
-            token = frame->prev = lex_next(frame->io,
-                                           ctx->header_name,
-                                           &frame->lineno);
+            token = frame->prev = lex_next(frame->io, ctx->header_name);
             if (!token) {
                 // Peek at next frame
                 frame = frame->next;
@@ -1032,10 +1028,8 @@ static void dir_endif(PpContext *ctx)
 
     // #endif must be preceded by some other conditional
     cond = pop_cond(ctx);
-    if (!cond) {
-        printf("On line %d\n", ctx->frames->lineno);
+    if (!cond)
         mcc_err("Unexpected #endif");
-    }
     free(cond);
 }
 

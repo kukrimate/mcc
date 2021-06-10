@@ -1,3 +1,5 @@
+## SPDX-License-Identifier: GPL-2.0-only
+
 ##
 # Makefile for mcc tests
 ##
@@ -17,11 +19,8 @@ TEST_PP_OBJ := $(LIBDIR)/lib/str.o $(LIBDIR)/pp/io.o $(LIBDIR)/pp/token.o \
 				$(LIBDIR)/pp/lex.o $(LIBDIR)/pp/cexpr.o $(LIBDIR)/pp/search.o \
 				$(LIBDIR)/pp/pp.o test_pp.o
 
-# Hash table test objects
-TESH_HASH_OBJ := $(LIBDIR)/lib/hash.o test_hash.o
-
 .PHONY: all
-all: test_lex test_pp test_hash
+all: test_lex test_pp
 
 test_lex: $(TEST_LEX_OBJ)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
@@ -29,13 +28,9 @@ test_lex: $(TEST_LEX_OBJ)
 test_pp: $(TEST_PP_OBJ)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-test_hash: $(TESH_HASH_OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
-
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $^
 
 .PHONY: clean
 clean:
-	rm -f test_hash $(TESH_HASH_OBJ) test_lex $(TEST_LEX_OBJ) \
-			test_pp $(TEST_PP_OBJ)
+	rm -f test_lex $(TEST_LEX_OBJ) test_pp $(TEST_PP_OBJ)

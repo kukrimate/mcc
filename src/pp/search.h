@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #ifndef SEARCH_H
 #define SEARCH_H
 

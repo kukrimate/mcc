@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 /*
  * Simple constant expression evaluator, this builds no AST thus pre-processor
  * constant expressions are evaluated quicker, also this removes the circular

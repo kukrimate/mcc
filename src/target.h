@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 /*
  * Types for representing values used in the execution environment
  * For now the target machine is assumed to be AMD64 with the following types:

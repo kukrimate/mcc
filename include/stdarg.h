@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #ifndef __MCC_STDARG_H
 #define __MCC_STDARG_H
 

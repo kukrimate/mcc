@@ -1,7 +1,14 @@
+## SPDX-License-Identifier: GPL-2.0-only
+
+##
+# Main Makefile for mcc
+##
+
+# Compiler flags
 CFLAGS := -Isrc -std=c99 -D_GNU_SOURCE -Wall -Wextra -g -O2
 
 # Library objects
-LIB_OBJ := src/lib/str.o src/lib/hash.o
+LIB_OBJ := src/lib/str.o
 
 # Preprocessor objects
 PP_OBJ := src/pp/io.o src/pp/token.o src/pp/lex.o \

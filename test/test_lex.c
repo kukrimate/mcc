@@ -9,39 +9,39 @@
 
 #include <assert.h>
 #include <string.h>
-#include <pp/io.h>
 #include <pp/token.h>
 #include <pp/lex.h>
 
-static void assert_next_type(Io *io, TokenType type)
+static void assert_next_type(LexCtx *ctx, TokenType type)
 {
     Token *tmp;
 
-    tmp = lex_next(io, 0);
+    tmp = lex_next(ctx, 0);
     assert(tmp && tmp->type == type);
     free_token(tmp);
 }
 
-static void assert_next_data(Io *io, TokenType type, const char *data)
+static void assert_next_data(LexCtx *ctx, TokenType type, const char *data)
 {
     Token *tmp;
 
-    tmp = lex_next(io, 0);
+    tmp = lex_next(ctx, 0);
     assert(tmp && tmp->type == type && !strcmp(tmp->data, data));
     free_token(tmp);
 }
 
-static void assert_next_space(Io *io, _Bool lnew, _Bool lwhite)
+static void assert_next_space(LexCtx *ctx, _Bool lnew, _Bool lwhite)
 {
     Token *tmp;
 
-    tmp = lex_next(io, 0);
+    tmp = lex_next(ctx, 0);
     assert(tmp && tmp->lnew == lnew && tmp->lwhite == lwhite);
+    free_token(tmp);
 }
 
-static void assert_next_null(Io *io)
+static void assert_next_null(LexCtx *ctx)
 {
-    assert(!lex_next(io, 0));
+    assert(lex_next(ctx, 0) == NULL);
 }
 
 // Test pre-processing numbers
@@ -49,37 +49,37 @@ static void test_ppnum(void)
 {
     // These include valid numberic constants as well as other things,
     // e.g. 0xE+12 becoming one pre-processing token is intended behaviour
-    Io *io = io_open_string(
+    LexCtx *ctx = lex_open_string(
         "0 123 05698 0x5555 0xE+12 .5555 0.5552 555ULL 55gggahHHH");
 
     size_t i;
 
     for (i = 0; i < 9; ++i)
-        assert_next_type(io, TK_PP_NUMBER);
+        assert_next_type(ctx, TK_PP_NUMBER);
 
-    assert_next_null(io);
-    io_close(io);
+    assert_next_null(ctx);
+    lex_free(ctx);
 }
 
 // Escape sequences
 static void test_esc(void)
 {
-    Io *io = io_open_string(
+    LexCtx *ctx = lex_open_string(
         "\"\\' \\\" \\? \\\\ \\a \\b \\f \\n \\r \\t \\v \\x7a \\122\" "
-        "'0 1 2 3 4 5 6 7 8 9 \x41 \x42 \x43 \x44 E F'");
+        "'0 1 2 3 4 5 6 7 8 9 \\x41 \\x42 \\x43 \\x44 E F'");
 
-    assert_next_data(io,
+    assert_next_data(ctx,
             TK_STRING_LIT, "\' \" \? \\ \a \b \f \n \r \t \v z R");
-    assert_next_data(io,
+    assert_next_data(ctx,
             TK_CHAR_CONST, "0 1 2 3 4 5 6 7 8 9 A B C D E F");
-    assert_next_null(io);
-    io_close(io);
+    assert_next_null(ctx);
+    lex_free(ctx);
 }
 
 // Punctuator parsing test
 static void test_punct(void)
 {
-    Io *io = io_open_string(
+    LexCtx *ctx = lex_open_string(
         // Normal
         "[ ] ( ) { } . ->\n"
         "++ -- & * + - ~ !\n"
@@ -115,27 +115,27 @@ static void test_punct(void)
     size_t i;
 
     for (i = 0; i < sizeof types / sizeof *types; ++i)
-        assert_next_type(io, types[i]);
+        assert_next_type(ctx, types[i]);
 
-    assert_next_null(io);
-    io_close(io);
+    assert_next_null(ctx);
+    lex_free(ctx);
 }
 
 // Token spacing test
 static void test_spacing(void)
 {
-    Io *io = io_open_string(
-        "1 2 3;\n4 \n5");
+    LexCtx *ctx = lex_open_string(
+        "1 2 3;\n4\n 5");
 
-    assert_next_space(io, 0, 0);
-    assert_next_space(io, 0, 1);
-    assert_next_space(io, 0, 1);
-    assert_next_space(io, 0, 0);
-    assert_next_space(io, 1, 0);
-    assert_next_space(io, 1, 1);
+    assert_next_space(ctx, 0, 0);
+    assert_next_space(ctx, 0, 1);
+    assert_next_space(ctx, 0, 1);
+    assert_next_space(ctx, 0, 0);
+    assert_next_space(ctx, 1, 0);
+    assert_next_space(ctx, 1, 1);
 
-    assert_next_null(io);
-    io_close(io);
+    assert_next_null(ctx);
+    lex_free(ctx);
 }
 
 int main(void)

@@ -8,15 +8,13 @@
 LIBDIR := ../src
 
 # C compiler flags
-CFLAGS := -I$(LIBDIR) -std=c99 -D_GNU_SOURCE -Wall -Wextra -O3 -g
+CFLAGS := -I$(LIBDIR) -std=c99 -D_GNU_SOURCE -Wall -Wextra -O1 -g
 
 # Lexer test objects
-TEST_LEX_OBJ := $(LIBDIR)/lib/str.o $(LIBDIR)/pp/io.o $(LIBDIR)/pp/token.o \
-				$(LIBDIR)/pp/lex.o test_lex.o
+TEST_LEX_OBJ := $(LIBDIR)/pp/token.o $(LIBDIR)/pp/lex.o test_lex.o
 
 # Preprocessor test objects
-TEST_PP_OBJ := $(LIBDIR)/lib/str.o $(LIBDIR)/pp/io.o $(LIBDIR)/pp/token.o \
-				$(LIBDIR)/pp/lex.o $(LIBDIR)/pp/cexpr.o $(LIBDIR)/pp/search.o \
+TEST_PP_OBJ  := $(LIBDIR)/pp/token.o $(LIBDIR)/pp/lex.o $(LIBDIR)/pp/cexpr.o \
 				$(LIBDIR)/pp/pp.o test_pp.o
 
 .PHONY: all

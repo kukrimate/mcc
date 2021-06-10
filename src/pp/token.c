@@ -9,7 +9,6 @@
 #include <string.h>
 #include <lib/vec.h>
 #include "token.h"
-#include "io.h"
 #include "lex.h"
 #include "err.h"
 
@@ -125,6 +124,65 @@ static char *punctuator_str[] = {
     [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
+//
+// Convert non-printable ASCII, and non-ASCII characters into escape sequences
+//
+static void escape_literal(Token *token, Vec_char *buf)
+{
+    char num[10];
+
+    for (const char *p = token->data; *p; ++p)
+        switch (*p) {
+        case '\'':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, '\'');
+            break;
+        case '"':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, '"');
+            break;
+        case '\\':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, '\\');
+            break;
+        case '\a':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 'a');
+            break;
+        case '\b':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 'b');
+            break;
+        case '\f':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 'f');
+            break;
+        case '\n':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 'n');
+            break;
+        case '\r':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 'r');
+            break;
+        case '\t':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 't');
+            break;
+        case '\v':
+            vec_char_add(buf, '\\');
+            vec_char_add(buf, 'v');
+            break;
+        default:
+            if (*p < 32 || *p > 126) {
+                vec_char_add(buf, '\\');
+                vec_char_addall(buf, num, snprintf(num, sizeof num, "%03o", *p));
+            } else {
+                vec_char_add(buf, *p);
+            }
+        }
+}
+
 static void token_to_str(Token *token, Vec_char *buf, _Bool want_white)
 {
     char *str;
@@ -143,12 +201,12 @@ static void token_to_str(Token *token, Vec_char *buf, _Bool want_white)
         break;
     case TK_CHAR_CONST:
         vec_char_add(buf, '\'');
-        vec_char_addall(buf, token->data, strlen(token->data));
+        escape_literal(token, buf);
         vec_char_add(buf, '\'');
         break;
     case TK_STRING_LIT:
         vec_char_add(buf, '\"');
-        vec_char_addall(buf, token->data, strlen(token->data));
+        escape_literal(token, buf);
         vec_char_add(buf, '\"');
         break;
     default:
@@ -207,15 +265,15 @@ Token *glue(Token *left, Token *right)
     token_to_str(right, &buf, 0);
 
     // Lex new buffer
-    Io *io = io_open_string(vec_char_str(&buf));
-    Token *result = lex_next(io, 0);
+    LexCtx *ctx = lex_open_string(vec_char_str(&buf));
+    Token *result = lex_next(ctx, 0);
     result->lnew = left->lnew;
     result->lwhite = left->lwhite;
     // If there are more tokens, it means glue failed
-    if (lex_next(io, 0))
+    if (lex_next(ctx, 0))
         mcc_err("Token concatenation must result in one token");
     // Free buffers
-    io_close(io);
+    lex_free(ctx);
     vec_char_free(&buf);
 
     return result;

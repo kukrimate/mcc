@@ -38,8 +38,10 @@ static void assert_identical_result(const char *str1, const char *str2)
     PpContext *ctx1, *ctx2;
     Token *t1, *t2;
 
-    ctx1 = pp_create_string(str1);
-    ctx2 = pp_create_string(str2);
+    ctx1 = pp_create();
+    pp_push_string(ctx1, str1);
+    ctx2 = pp_create();
+    pp_push_string(ctx2, str2);
 
     for (;;) {
         t1 = pp_expand(ctx1);

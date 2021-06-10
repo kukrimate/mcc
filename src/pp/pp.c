@@ -8,7 +8,6 @@
 #include <limits.h>
 #include <lib/vec.h>
 #include "token.h"
-#include "io.h"
 #include "lex.h"
 #include "err.h"
 #include "cexpr.h"
@@ -57,9 +56,8 @@ struct Frame {
     union {
         // F_LEXER
         struct {
-            _Bool first;   // First token from this frame?
-            Io    *io;     // Token source
-            Token *prev;   // For peeking
+            LexCtx *lex;    // Lexer context
+            Token  *prev;   // For peeking
         };
         // F_LIST
         struct {
@@ -114,19 +112,18 @@ static void drop_frame(PpContext *ctx)
 
     tmp = ctx->frames;
     if (tmp->type == F_LEXER)
-        io_close(tmp->io);
+        lex_free(tmp->lex);
     ctx->frames = ctx->frames->next;
     free(tmp);
 }
 
-void pp_push_file_frame(PpContext *ctx, Io *io)
+void pp_push_lex_frame(PpContext *ctx, LexCtx *lex)
 {
     Frame *frame;
 
     frame = new_frame(ctx);
     frame->type = F_LEXER;
-    frame->first = 1;
-    frame->io = io;
+    frame->lex = lex;
 }
 
 void pp_push_list_frame(PpContext *ctx, Macro *source, Token *tokens)
@@ -162,16 +159,11 @@ recurse:
             frame->prev = NULL;
         } else {
             // Read token directly from lexer
-            token = lex_next(frame->io, ctx->header_name);
+            token = lex_next(frame->lex, ctx->header_name);
             if (!token) {
                 // Remove frame
                 drop_frame(ctx);
                 goto recurse;
-            }
-            // Mark appropriate token from the lexer as a directive
-            if (frame->first || token->lnew) {
-                token->directive = 1;
-                frame->first = 0;
             }
         }
         break;
@@ -213,16 +205,11 @@ recurse:
             token = frame->prev;
         } else {
             // Fill frame->prev if it doesn't exist
-            token = frame->prev = lex_next(frame->io, ctx->header_name);
+            token = frame->prev = lex_next(frame->lex, ctx->header_name);
             if (!token) {
                 // Peek at next frame
                 frame = frame->next;
                 goto recurse;
-            }
-            // Mark appropriate token from the lexer as a directive
-            if (frame->first || token->lnew) {
-                token->directive = 1;
-                frame->first = 0;
             }
         }
         break;
@@ -1052,35 +1039,35 @@ static _Bool is_defined(PpContext *ctx)
     return result;
 }
 
-static Io *open_system_header(PpContext *ctx, const char *name)
+static LexCtx *open_system_header(PpContext *ctx, const char *name)
 {
     char path[PATH_MAX];
-    Io *io;
+    LexCtx *lex;
 
     for (size_t i = 0; i < ctx->search_dirs.n; ++i) {
         snprintf(path, sizeof path, "%s/%s", ctx->search_dirs.arr[i], name);
-        if ((io = io_open(path)))
-            return io;
+        if ((lex = lex_open_file(path)))
+            return lex;
     }
 
     return NULL;
 }
 
-static Io *open_local_header(PpContext *ctx, const char *name)
+static LexCtx *open_local_header(PpContext *ctx, const char *name)
 {
-    Io *io;
+    LexCtx *lex;
 
     // Retry failed local header as a system one
-    if (!(io = io_open(name)))
+    if (!(lex = lex_open_file(name)))
         return open_system_header(ctx, name);
-    return io;
+    return lex;
 }
 
 // #include directive
 static void dir_include(PpContext *ctx)
 {
-    Token *hname;
-    Io    *io;
+    Token  *hname;
+    LexCtx *lex;
 
     ctx->header_name = 1;
     hname = pp_readline(ctx);
@@ -1090,10 +1077,10 @@ static void dir_include(PpContext *ctx)
 
     switch (hname->type) {
     case TK_HCHAR_LIT:
-        io = open_system_header(ctx, hname->data);
+        lex = open_system_header(ctx, hname->data);
         break;
     case TK_QCHAR_LIT:
-        io = open_local_header(ctx, hname->data);
+        lex = open_local_header(ctx, hname->data);
         break;
     default:
         mcc_err("Invalid header name");
@@ -1101,9 +1088,9 @@ static void dir_include(PpContext *ctx)
     }
     free_token(hname);
 
-    if (!io)
+    if (!lex)
         mcc_err("Can't locate header file");
-    pp_push_file_frame(ctx, io);
+    pp_push_lex_frame(ctx, lex);
 }
 
 void handle_directive(PpContext *ctx)
@@ -1166,15 +1153,15 @@ void pp_add_search_dir(PpContext *ctx, const char *dir)
 
 int pp_push_file(PpContext *ctx, const char *path)
 {
-    Io *file_io = io_open(path);
-    if (!file_io)
+    LexCtx *lex = lex_open_file(path);
+    if (!lex)
         return -1;
 
-    pp_push_file_frame(ctx, file_io);
+    pp_push_lex_frame(ctx, lex);
     return 0;
 }
 
 void pp_push_string(PpContext *ctx, const char *string)
 {
-    pp_push_file_frame(ctx, io_open_string(string));
+    pp_push_lex_frame(ctx, lex_open_string(string));
 }

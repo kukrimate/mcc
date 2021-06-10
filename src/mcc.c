@@ -1,38 +1,79 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /*
- * Compiler driver
+ * Standalone C pre-processor
  */
 
 #include <stdio.h>
-#include <pp/token.h>
-#include <pp/pp.h>
-#include <target.h>
-#include <parse/parse.h>
+#include <stdlib.h>
+#include <getopt.h>
+#include "pp/token.h"
+#include "pp/pp.h"
+#include "target.h"
+#include "parse/parse.h"
+
+static void do_preprocess(PpContext *pp)
+{
+    Token *tmp;
+    // Read then output all tokens from the pre-processor
+    while ((tmp = pp_expand(pp))) {
+        output_token(tmp);
+        free_token(tmp);
+    }
+    // Output a newline after the last token
+    putchar('\n');
+}
+
+static void do_compile(PpContext *pp)
+{
+    ParseCtx *parse = parse_create(pp);
+    parse_run(parse);
+    parse_free(parse);
+}
 
 int main(int argc, char *argv[])
 {
-    PpContext *pp;
-    ParseCtx *parse;
+    PpContext *pp = pp_create();
+    pp_add_search_dir(pp, "include");
+    pp_add_search_dir(pp, "/usr/include");
+    pp_add_search_dir(pp, "/usr/include/x86_64-linux-gnu");
+    pp_add_search_dir(pp, "/usr/local/include");
 
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s FILE\n", argv[0]);
-        return 1;
+    int opt;
+    _Bool eflag = 0;
+
+    while ((opt = getopt(argc, argv, "I:Eh")) != -1)
+        switch (opt) {
+        case 'I':
+            pp_add_search_dir(pp, optarg);
+            break;
+        case 'E':
+            eflag = 1;
+            break;
+        case 'h':
+        default:
+            goto print_usage;
+        }
+
+    if (optind >= argc) {
+print_usage:
+        fprintf(stderr, "Usage: %s [-I IDIR] [-h] FILE\n", argv[0]);
+        goto err;
     }
 
-    // Setup pre-processor
-    pp = pp_create(argv[1]);
-    if (!pp) {
-        perror(argv[1]);
-        return 1;
+    if (pp_push_file(pp, argv[optind]) < 0) {
+        perror(argv[optind]);
+        goto err;
     }
 
-    // Setup parser
-    parse = parse_create(pp);
+    if (eflag)
+        do_preprocess(pp);
+    else
+        do_compile(pp);
 
-    // Run parser (temporary API for testing)
-    parse_run(parse);
-
-    parse_free(parse);
+    int result = 0;
+err:
+    result = 1;
     pp_free(pp);
+    return result;
 }

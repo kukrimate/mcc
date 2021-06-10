@@ -7,51 +7,51 @@ typedef enum {
     // Constant
     ND_CONST,
     // Unary opeartors
-    ND_REF,     // &foo
-    ND_DEREF,   // *foo
-    ND_MINUS,   // -
-    ND_BIT_INV, // ~
-    ND_NOT,     // !
+    ND_REF,      // &foo
+    ND_DEREF,    // *foo
+    ND_MINUS,    // -
+    ND_BIT_INV,  // ~
+    ND_NOT,      // !
     // Binary operators
-    ND_MUL,     // *
-    ND_DIV,     // /
-    ND_MOD,     // %
-    ND_ADD,     // +
-    ND_SUB,     // -
-    ND_LSHIFT,  // <<
-    ND_RSHIFT,  // >>
-    ND_LESS,    // <
-    ND_MORE,    // >
-    ND_LESS_EQ, // <=
-    ND_MORE_EQ, // >=
-    ND_EQ,      // ==
-    ND_NEQ,     // !=
-    ND_AND,     // &
-    ND_XOR,     // ^
-    ND_OR,      // |
-    ND_LAND,    // &&
-    ND_LOR,     // ||
+    ND_MUL,      // *
+    ND_DIV,      // /
+    ND_MOD,      // %
+    ND_ADD,      // +
+    ND_SUB,      // -
+    ND_LSHIFT,   // <<
+    ND_RSHIFT,   // >>
+    ND_LESS,     // <
+    ND_MORE,     // >
+    ND_LESS_EQ,  // <=
+    ND_MORE_EQ,  // >=
+    ND_EQ,       // ==
+    ND_NEQ,      // !=
+    ND_AND,      // &
+    ND_XOR,      // ^
+    ND_OR,       // |
+    ND_LAND,     // &&
+    ND_LOR,      // ||
     // Assingment operators
-    ND_ASSIGN,  // =
-    ND_AS_MUL,  // *=
-    ND_AS_DIV,  // /=
-    ND_AS_MOD,  // %=
-    ND_AS_ADD,  // +=
-    ND_AS_SUB,  // -=
-    ND_AS_LSH,  // <<=
-    ND_AS_RSH,  // >>=
-    ND_AS_AND,  // &=
-    ND_AS_XOR,  // ^=
-    ND_AS_OR,   // |=
+    ND_ASSIGN,   // =
+    ND_AS_MUL,   // *=
+    ND_AS_DIV,   // /=
+    ND_AS_MOD,   // %=
+    ND_AS_ADD,   // +=
+    ND_AS_SUB,   // -=
+    ND_AS_LSH,   // <<=
+    ND_AS_RSH,   // >>=
+    ND_AS_AND,   // &=
+    ND_AS_XOR,   // ^=
+    ND_AS_OR,    // |=
     // Others
-    ND_MEMBER,  // foo.bar (foo->bar desugars to (*foo).bar)
-    ND_CAST,    // (int) foo
-    ND_COND,    // ?: (ternary conditional)
-    ND_COMMA,   // , opeartor
-    ND_PRE_INC, // ++i
-    ND_PRE_DEC, // --i
-    ND_POST_INC,// i++ (postfix increment)
-    ND_POST_DEC,// i-- (postfix decrement)
+    ND_MEMBER,   // foo.bar (foo->bar desugars to (*foo).bar)
+    ND_CAST,     // (int) foo
+    ND_COND,     // ?: (ternary conditional)
+    ND_COMMA,    // , opeartor
+    ND_PRE_INC,  // ++i
+    ND_PRE_DEC,  // --i
+    ND_POST_INC, // i++ (postfix increment)
+    ND_POST_DEC, // i-- (postfix decrement)
 } NodeType;
 
 typedef struct Node Node;

@@ -5,8 +5,8 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <limits.h>
+#include <lib/vec.h>
 #include "token.h"
 #include "io.h"
 #include "lex.h"
@@ -83,8 +83,13 @@ struct Cond {
     Cond *next;
 };
 
+//
 // Preprocessor context
+//
+
 struct PpContext {
+    // Header search directories
+    Vec_cstr search_dirs;
     // Enable header name mode?
     _Bool header_name;
     // Preprocessor frames
@@ -114,7 +119,7 @@ static void drop_frame(PpContext *ctx)
     free(tmp);
 }
 
-void pp_push_file(PpContext *ctx, Io *io)
+void pp_push_file_frame(PpContext *ctx, Io *io)
 {
     Frame *frame;
 
@@ -124,7 +129,7 @@ void pp_push_file(PpContext *ctx, Io *io)
     frame->io = io;
 }
 
-void pp_push_list(PpContext *ctx, Macro *source, Token *tokens)
+void pp_push_list_frame(PpContext *ctx, Macro *source, Token *tokens)
 {
     Frame *frame;
 
@@ -459,7 +464,7 @@ static Token *pp_subst(PpContext *ctx, Macro *macro, Token **actuals)
             // We need to pre-expand the actual parameter
             subctx.frames = NULL;
             subctx.macros = ctx->macros;
-            pp_push_list(&subctx, NULL, dup_tokens(actuals[replace->param_idx]));
+            pp_push_list_frame(&subctx, NULL, dup_tokens(actuals[replace->param_idx]));
             for (first = 1;; first = 0) {
                 tmp = pp_expand(&subctx);
                 if (!tmp)
@@ -509,38 +514,38 @@ typedef struct {
 
 static void handle_date(PpContext *ctx)
 {
-    pp_push_list(ctx, NULL,
+    pp_push_list_frame(ctx, NULL,
         create_token(TK_PP_NUMBER, strdup("Mar  7 2021")));
 }
 
 
 static void handle_time(PpContext *ctx)
 {
-    pp_push_list(ctx, NULL,
+    pp_push_list_frame(ctx, NULL,
         create_token(TK_STRING_LIT, strdup("15:30:07")));
 }
 
 static void handle_file(PpContext *ctx)
 {
-    pp_push_list(ctx, NULL,
+    pp_push_list_frame(ctx, NULL,
         create_token(TK_STRING_LIT, strdup("unknown")));
 }
 
 static void handle_line(PpContext *ctx)
 {
-    pp_push_list(ctx, NULL,
+    pp_push_list_frame(ctx, NULL,
         create_token(TK_STRING_LIT, strdup("1")));
 }
 
 static void handle_one(PpContext *ctx)
 {
-    pp_push_list(ctx, NULL,
+    pp_push_list_frame(ctx, NULL,
      create_token(TK_PP_NUMBER, strdup("1")));
 }
 
 static void handle_vers(PpContext *ctx)
 {
-    pp_push_list(ctx, NULL,
+    pp_push_list_frame(ctx, NULL,
      create_token(TK_PP_NUMBER, strdup("199901L")));
 }
 
@@ -639,7 +644,7 @@ recurse:
     }
 
     // Push result after expansion
-    pp_push_list(ctx, macro, expansion);
+    pp_push_list_frame(ctx, macro, expansion);
 
 retry_inherit_space:
     // Next token on the stream inherits our spacing
@@ -908,7 +913,7 @@ static _Bool is_cexpr(PpContext *ctx)
     // We need to macro expand the constant expression
     subctx.frames = NULL;
     subctx.macros = ctx->macros;
-    pp_push_list(&subctx, NULL, head);
+    pp_push_list_frame(&subctx, NULL, head);
 
     head = NULL;
     tail = &head;
@@ -1047,6 +1052,30 @@ static _Bool is_defined(PpContext *ctx)
     return result;
 }
 
+static Io *open_system_header(PpContext *ctx, const char *name)
+{
+    char path[PATH_MAX];
+    Io *io;
+
+    for (size_t i = 0; i < ctx->search_dirs.n; ++i) {
+        snprintf(path, sizeof path, "%s/%s", ctx->search_dirs.arr[i], name);
+        if ((io = io_open(path)))
+            return io;
+    }
+
+    return NULL;
+}
+
+static Io *open_local_header(PpContext *ctx, const char *name)
+{
+    Io *io;
+
+    // Retry failed local header as a system one
+    if (!(io = io_open(name)))
+        return open_system_header(ctx, name);
+    return io;
+}
+
 // #include directive
 static void dir_include(PpContext *ctx)
 {
@@ -1061,10 +1090,10 @@ static void dir_include(PpContext *ctx)
 
     switch (hname->type) {
     case TK_HCHAR_LIT:
-        io = open_system_header(hname->data);
+        io = open_system_header(ctx, hname->data);
         break;
     case TK_QCHAR_LIT:
-        io = open_local_header(hname->data);
+        io = open_local_header(ctx, hname->data);
         break;
     default:
         mcc_err("Invalid header name");
@@ -1074,7 +1103,7 @@ static void dir_include(PpContext *ctx)
 
     if (!io)
         mcc_err("Can't locate header file");
-    pp_push_file(ctx, io);
+    pp_push_file_frame(ctx, io);
 }
 
 void handle_directive(PpContext *ctx)
@@ -1116,42 +1145,36 @@ void handle_directive(PpContext *ctx)
     free_token(tmp);
 }
 
-PpContext *pp_create(const char *path)
+PpContext *pp_create(void)
 {
-    Io *io;
-    PpContext *ctx;
-
-    // Open file
-    io = io_open(path);
-    if (!io)
-        return NULL;
-
-    // Create context
-    ctx = calloc(1, sizeof *ctx);
-    pp_push_file(ctx, io);
-
-    return ctx;
-}
-
-PpContext *pp_create_string(const char *string)
-{
-    Io *io;
-    PpContext *ctx;
-
-    // Open I/O handle for string
-    io = io_open_string(string);
-    if (!io)
-        return NULL;
-
-    // Create context
-    ctx = calloc(1, sizeof *ctx);
-    pp_push_file(ctx, io);
-
+    PpContext *ctx = calloc(1, sizeof *ctx);
+    vec_cstr_init(&ctx->search_dirs);
     return ctx;
 }
 
 void pp_free(PpContext *ctx)
 {
+    vec_cstr_free(&ctx->search_dirs);
     free_macros(ctx->macros);
     free(ctx);
+}
+
+void pp_add_search_dir(PpContext *ctx, const char *dir)
+{
+    vec_cstr_add(&ctx->search_dirs, dir);
+}
+
+int pp_push_file(PpContext *ctx, const char *path)
+{
+    Io *file_io = io_open(path);
+    if (!file_io)
+        return -1;
+
+    pp_push_file_frame(ctx, file_io);
+    return 0;
+}
+
+void pp_push_string(PpContext *ctx, const char *string)
+{
+    pp_push_file_frame(ctx, io_open_string(string));
 }

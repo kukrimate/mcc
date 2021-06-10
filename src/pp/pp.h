@@ -3,19 +3,39 @@
 #ifndef PP_H
 #define PP_H
 
-// Preprocessor context
+//
+// Opaque pre-processor context
+//
 typedef struct PpContext PpContext;
 
-// Create a pre-processor context for a file
-PpContext *pp_create(const char *path);
+//
+// Create a pre-processor context
+//
+PpContext *pp_create(void);
 
-// Create a pre-processor context for a string
-PpContext *pp_create_string(const char *string);
-
-// Read the next expanded token from the preprocessor
-Token *pp_expand(PpContext *ctx);
-
+//
 // Free a preprocessor context
+//
 void pp_free(PpContext *ctx);
+
+//
+// Add a search directory to the pre-processor
+//
+void pp_add_search_dir(PpContext *ctx, const char *dir);
+
+//
+// Push a file to the pre-processor stack
+//
+int pp_push_file(PpContext *ctx, const char *path);
+
+//
+// Push a string to the pre-processor stack
+//
+void pp_push_string(PpContext *ctx, const char *string);
+
+//
+// Get the next pre-processed token
+//
+Token *pp_expand(PpContext *ctx);
 
 #endif

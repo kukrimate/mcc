@@ -82,4 +82,10 @@ static inline char *vec_char_str(Vec_char *self)
     return self->arr;
 }
 
+//
+// Vector of strings
+//
+
+VEC_GEN(const char *, cstr)
+
 #endif

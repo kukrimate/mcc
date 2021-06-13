@@ -17,34 +17,68 @@ typedef enum {
 } LexType;
 
 struct LexCtx {
+    // Name of the current file
+    const char *filename;
+    // Line number in the current file
+    size_t line;
+    // Is this the first token read from the context?
+    _Bool first;
+
+    // Type of data being lexed
     LexType type;
     union {
         FILE *fp;
         const char *str;
     };
-    _Bool first; // Is this the first token read from the context?
 };
 
-LexCtx *lex_open_file(const char *file)
+static const char *get_filename(const char *filepath)
 {
-    LexCtx *ctx = calloc(1, sizeof *ctx);
-    ctx->type = LEX_FILE;
-    ctx->fp = fopen(file, "r");
-    if (!ctx->fp) {
-        free(ctx);
+    const char *prev = filepath, *next;
+    while ((next = strchr(prev, '/')))
+        prev = next + 1;
+    return prev;
+}
+
+LexCtx *lex_open_file(const char *filepath)
+{
+    FILE *fp = fopen(filepath, "r");
+    if (!fp)
         return NULL;
-    }
+
+    LexCtx *ctx = calloc(1, sizeof *ctx);
+    ctx->filename = get_filename(filepath);
+    ctx->line = 1;
     ctx->first = 1;
+
+    ctx->type = LEX_FILE;
+    ctx->fp = fp;
     return ctx;
 }
 
-LexCtx *lex_open_string(const char *str)
+LexCtx *lex_open_string(const char *filename, const char *str)
 {
     LexCtx *ctx = calloc(1, sizeof *ctx);
+    ctx->filename = filename;
+    ctx->line = 1;
+    ctx->first = 1;
+
     ctx->type = LEX_STR;
     ctx->str = str;
-    ctx->first = 1;
     return ctx;
+}
+
+const char *lex_filename(LexCtx *ctx)
+{
+    // This API is only allowed to be called when a filename was specified
+    assert(ctx->filename != NULL);
+
+    return ctx->filename;
+}
+
+size_t lex_line(LexCtx *ctx)
+{
+    return ctx->line;
 }
 
 void lex_free(LexCtx *ctx)

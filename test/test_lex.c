@@ -49,7 +49,7 @@ static void test_ppnum(void)
 {
     // These include valid numberic constants as well as other things,
     // e.g. 0xE+12 becoming one pre-processing token is intended behaviour
-    LexCtx *ctx = lex_open_string(
+    LexCtx *ctx = lex_open_string("test_ppnum.c",
         "0 123 05698 0x5555 0xE+12 .5555 0.5552 555ULL 55gggahHHH");
 
     size_t i;
@@ -64,7 +64,7 @@ static void test_ppnum(void)
 // Escape sequences
 static void test_esc(void)
 {
-    LexCtx *ctx = lex_open_string(
+    LexCtx *ctx = lex_open_string("test_esc.c",
         "\"\\' \\\" \\? \\\\ \\a \\b \\f \\n \\r \\t \\v \\x7a \\122\" "
         "'0 1 2 3 4 5 6 7 8 9 \\x41 \\x42 \\x43 \\x44 E F'");
 
@@ -79,7 +79,7 @@ static void test_esc(void)
 // Punctuator parsing test
 static void test_punct(void)
 {
-    LexCtx *ctx = lex_open_string(
+    LexCtx *ctx = lex_open_string("test_punct.c",
         // Normal
         "[ ] ( ) { } . ->\n"
         "++ -- & * + - ~ !\n"
@@ -124,7 +124,7 @@ static void test_punct(void)
 // Token spacing test
 static void test_spacing(void)
 {
-    LexCtx *ctx = lex_open_string(
+    LexCtx *ctx = lex_open_string("test_spacing.c",
         "1 2 3;\n4\n 5");
 
     assert_next_space(ctx, 0, 0);

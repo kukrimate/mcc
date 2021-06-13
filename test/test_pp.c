@@ -39,9 +39,9 @@ static void assert_identical_result(const char *str1, const char *str2)
     Token *t1, *t2;
 
     ctx1 = pp_create();
-    pp_push_string(ctx1, str1);
+    pp_push_string(ctx1, "test_pp1.c", str1);
     ctx2 = pp_create();
-    pp_push_string(ctx2, str2);
+    pp_push_string(ctx2, "test_pp2.c", str2);
 
     for (;;) {
         t1 = pp_expand(ctx1);

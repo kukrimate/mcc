@@ -4,12 +4,13 @@
  * Preprocessor
  */
 
+#include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <limits.h>
 #include <lib/vec.h>
 #include "token.h"
 #include "lex.h"
-#include "err.h"
 #include "cexpr.h"
 #include "search.h"
 #include "pp.h"
@@ -97,6 +98,25 @@ struct PpContext {
     // Conditional-inclusion stack
     Cond  *conds;
 };
+
+static void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ...)
+{
+    Frame *file_frame = ctx->frames;
+    while (file_frame->type != F_LEXER) {
+        file_frame = file_frame->next;
+        assert(file_frame != NULL);
+    }
+
+    fflush(stdout);
+    fprintf(stderr, "\nError in: %s:%ld: ", lex_filename(file_frame->lex),
+        lex_line(file_frame->lex));
+    va_list ap;
+    va_start(ap, err);
+    vfprintf(stderr, err, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    exit(1);
+}
 
 static Frame *new_frame(PpContext *ctx)
 {
@@ -331,14 +351,14 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
     // Argument list needs to start with (
     tmp = pp_read(ctx);
     if (!tmp || tmp->type != TK_LEFT_PAREN)
-        mcc_err("Missing ( for function-like macro call");
+        pp_err(ctx, "Missing ( for function-like macro call");
     free_token(tmp);
 
     // Just check for closing parenthesis for 0 paramter macro
     if (!macro->param_cnt) {
         tmp = pp_read(ctx);
         if (!tmp || tmp->type != TK_RIGHT_PAREN)
-            mcc_err("Non-empty argument list for 0 parameter macro");
+            pp_err(ctx, "Non-empty argument list for 0 parameter macro");
         free_token(tmp);
         return;
     }
@@ -353,7 +373,7 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
     for (;;) {
         tmp = pp_read(ctx);
         if (!tmp)
-            mcc_err("Unexpected end of parameters");
+            pp_err(ctx, "Unexpected end of parameters");
 
         switch (tmp->type) {
         case TK_COMMA:
@@ -365,7 +385,7 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
             free_token(tmp);
             // Move to next actual parameter
             if (actual_cnt >= macro->param_cnt)
-                mcc_err("Too many parameters for function-like macro");
+                pp_err(ctx, "Too many parameters for function-like macro");
             tmps = &actuals[actual_cnt++];
             break;
         case TK_LEFT_PAREN:
@@ -392,7 +412,7 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
 
     // Make sure we got the correct number of actuals
     if (macro->param_cnt != actual_cnt)
-        mcc_err("Too few parameters for function-like macro");
+        pp_err(ctx, "Too few parameters for function-like macro");
 }
 
 
@@ -670,7 +690,7 @@ static void capture_formals(PpContext *ctx, Macro *macro)
     // First token must be an lparen
     tmp = pp_readline(ctx);
     if (!tmp || tmp->type != TK_LEFT_PAREN)
-        mcc_err("Formal parameters must start with (");
+        pp_err(ctx, "Formal parameters must start with (");
 
     // Initialize token list
     tail = &macro->formals;
@@ -684,7 +704,7 @@ want_ident:
     // Read formal parameter name
     tmp = pp_readline(ctx);
     if (!tmp)
-        mcc_err("Unexpected end of formal parameters");
+        pp_err(ctx, "Unexpected end of formal parameters");
     if (tmp->type == TK_RIGHT_PAREN)
         goto end;
     // Variable argument mode
@@ -695,11 +715,11 @@ want_ident:
     }
     // Must be an identifier
     if (tmp->type != TK_IDENTIFIER)
-        mcc_err("Invalid token in formal parameter list");
+        pp_err(ctx, "Invalid token in formal parameter list");
 
     // Make sure it's not duplicate
     if (find_formal(macro, tmp) >= 0)
-        mcc_err("Duplicate formal parameter name");
+        pp_err(ctx, "Duplicate formal parameter name");
 
     // Add name to the list
     *tail = tmp;
@@ -709,14 +729,14 @@ want_ident:
     // Next token must be a , or )
     tmp = pp_readline(ctx);
     if (!tmp)
-        mcc_err("Unexpected end of formal parameters");
+        pp_err(ctx, "Unexpected end of formal parameters");
     if (tmp->type == TK_COMMA) {
         if (macro->has_varargs)
-            mcc_err("Variable args must be the last formal parameter of macro");
+            pp_err(ctx, "Variable args must be the last formal parameter of macro");
         goto want_ident;
     }
     if (tmp->type != TK_RIGHT_PAREN)
-        mcc_err("Invalid token in formal parameter list");
+        pp_err(ctx, "Invalid token in formal parameter list");
 end:
     free_token(tmp);
 }
@@ -737,7 +757,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
         case TK_HASH_HASH:
             // Must be preceeded by something
             if (!macro->replace_list)
-                mcc_err("## operator must not be the first token of a replacement list");
+                pp_err(ctx, "## operator must not be the first token of a replacement list");
 
             // Do *not* expand parameter before ## operator
             if (prev->type == R_PARAM_EXP)
@@ -759,7 +779,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
                 // Get formal parameter name
                 tmp = pp_readline(ctx);
                 if (!tmp || (formal_idx = find_formal(macro, tmp)) < 0) {
-                    mcc_err("# operator must be followed by formal parameter name");
+                    pp_err(ctx, "# operator must be followed by formal parameter name");
                 }
 
                 prev = *tail = calloc(1, sizeof **tail);
@@ -789,7 +809,7 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
     }
 
     if (do_glue)
-        mcc_err("## operator must not be the last token in a replacement list");
+        pp_err(ctx, "## operator must not be the last token in a replacement list");
 }
 
 static void dir_define(PpContext *ctx)
@@ -800,7 +820,7 @@ static void dir_define(PpContext *ctx)
     // Macro name must be an identifier
     tmp = pp_readline(ctx);
     if (!tmp || tmp->type != TK_IDENTIFIER)
-        mcc_err("Macro name must be an identifier");
+        pp_err(ctx, "Macro name must be an identifier");
 
     // Put macro name into database and get pointer to struct
     macro = new_macro(ctx);
@@ -829,7 +849,7 @@ static void dir_undef(PpContext *ctx)
     // Macro name must be an identifier
     tmp = pp_readline(ctx);
     if (!tmp || tmp->type != TK_IDENTIFIER)
-        mcc_err("Macro name must be an identifier");
+        pp_err(ctx, "Macro name must be an identifier");
     // Delete macro
     del_macro(ctx, tmp);
     free_token(tmp);
@@ -919,7 +939,7 @@ static _Bool is_cexpr(PpContext *ctx)
     return result;
 
 err_defined:
-    mcc_err("Missing/malformed argument for defined operator");
+    pp_err(ctx, "Missing/malformed argument for defined operator");
 }
 
 // Skip till the next signficant conditional, if want_else_elif it can be either
@@ -977,7 +997,7 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
     return C_ENDIF;
 
 err:
-    mcc_err("Unterminated conditional inclusion");
+    pp_err(ctx, "Unterminated conditional inclusion");
 }
 
 // Handle #if directive
@@ -1007,7 +1027,7 @@ static void dir_else(PpContext *ctx)
     // #else or #elif must come after an #if or #elif
     Cond *prev = pop_cond(ctx);
     if (!prev || !(prev->type == C_IF || prev->type == C_ELIF))
-        mcc_err("Unexpected #else or #elif");
+        pp_err(ctx, "Unexpected #else or #elif");
     free(prev);
 
     // #else or #elif of an active #if just skips till #endif
@@ -1021,7 +1041,7 @@ static void dir_endif(PpContext *ctx)
     // #endif must be preceded by some other conditional
     cond = pop_cond(ctx);
     if (!cond)
-        mcc_err("Unexpected #endif");
+        pp_err(ctx, "Unexpected #endif");
     free(cond);
 }
 
@@ -1032,7 +1052,7 @@ static _Bool is_defined(PpContext *ctx)
 
     tmp = pp_readline(ctx);
     if (!tmp || tmp->type != TK_IDENTIFIER)
-        mcc_err("#if(n)def must be followed by a macro name");
+        pp_err(ctx, "#if(n)def must be followed by a macro name");
 
     result = is_predef(tmp) || find_macro(ctx, tmp);
     free_token(tmp);
@@ -1072,7 +1092,7 @@ static void dir_include(PpContext *ctx)
     ctx->header_name = 1;
     hname = pp_readline(ctx);
     if (!hname)
-        mcc_err("Missing header name from #include");
+        pp_err(ctx, "Missing header name from #include");
     ctx->header_name = 0;
 
     switch (hname->type) {
@@ -1083,13 +1103,14 @@ static void dir_include(PpContext *ctx)
         lex = open_local_header(ctx, hname->data);
         break;
     default:
-        mcc_err("Invalid header name");
+        pp_err(ctx, "Invalid header name");
         break;
     }
-    free_token(hname);
 
     if (!lex)
-        mcc_err("Can't locate header file");
+        pp_err(ctx, "Can't locate header file: %s", hname->data);
+
+    free_token(hname);
     pp_push_lex_frame(ctx, lex);
 }
 
@@ -1104,7 +1125,7 @@ void handle_directive(PpContext *ctx)
 
     // Otherwise the directive name must follow
     if (tmp->type != TK_IDENTIFIER)
-        mcc_err("Pre-processing directive must be an identifier");
+        pp_err(ctx, "Pre-processing directive must be an identifier");
 
     // Check for all supported directives
     if (!strcmp(tmp->data, "define"))
@@ -1126,7 +1147,7 @@ void handle_directive(PpContext *ctx)
     else if (!strcmp(tmp->data, "include"))
         dir_include(ctx);
     else
-        mcc_err("Unknown pre-prerocessing directive");
+        pp_err(ctx, "Unknown pre-prerocessing directive");
 
     // Free directive name
     free_token(tmp);
@@ -1161,7 +1182,7 @@ int pp_push_file(PpContext *ctx, const char *path)
     return 0;
 }
 
-void pp_push_string(PpContext *ctx, const char *string)
+void pp_push_string(PpContext *ctx, const char *filename, const char *string)
 {
-    pp_push_lex_frame(ctx, lex_open_string(string));
+    pp_push_lex_frame(ctx, lex_open_string(filename, string));
 }

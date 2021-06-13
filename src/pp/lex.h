@@ -6,14 +6,24 @@
 typedef struct LexCtx LexCtx;
 
 //
-// Open  a lexer context for a file
+// Open a lexer context for a file
 //
-LexCtx *lex_open_file(const char *file);
+LexCtx *lex_open_file(const char *filepath);
 
 //
 // Open a lexer context for an in-memory string
 //
-LexCtx *lex_open_string(const char *str);
+LexCtx *lex_open_string(const char *filename, const char *str);
+
+//
+// Get the current file's name
+//
+const char *lex_filename(LexCtx *ctx);
+
+//
+// Get the current line in the file
+//
+size_t lex_line(LexCtx *ctx);
 
 //
 // Free the lexer context

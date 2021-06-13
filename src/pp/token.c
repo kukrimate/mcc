@@ -265,7 +265,7 @@ Token *glue(Token *left, Token *right)
     token_to_str(right, &buf, 0);
 
     // Lex new buffer
-    LexCtx *ctx = lex_open_string(vec_char_str(&buf));
+    LexCtx *ctx = lex_open_string(NULL, vec_char_str(&buf));
     Token *result = lex_next(ctx, 0);
     result->lnew = left->lnew;
     result->lwhite = left->lwhite;

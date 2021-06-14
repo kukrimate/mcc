@@ -124,132 +124,99 @@ static char *punctuator_str[] = {
     [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
-//
-// Convert non-printable ASCII, and non-ASCII characters into escape sequences
-//
-static void escape_literal(Token *token, Vec_char *buf)
+static const char *token_spelling(Token *token)
 {
-    char num[10];
-
-    for (const char *p = token->data; *p; ++p)
-        switch (*p) {
-        case '\'':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, '\'');
-            break;
-        case '"':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, '"');
-            break;
-        case '\\':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, '\\');
-            break;
-        case '\a':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 'a');
-            break;
-        case '\b':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 'b');
-            break;
-        case '\f':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 'f');
-            break;
-        case '\n':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 'n');
-            break;
-        case '\r':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 'r');
-            break;
-        case '\t':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 't');
-            break;
-        case '\v':
-            vec_char_add(buf, '\\');
-            vec_char_add(buf, 'v');
-            break;
-        default:
-            if (*p < 32 || *p > 126) {
-                vec_char_add(buf, '\\');
-                vec_char_addall(buf, num, snprintf(num, sizeof num, "%03o", *p));
-            } else {
-                vec_char_add(buf, *p);
-            }
-        }
-}
-
-static void token_to_str(Token *token, Vec_char *buf, _Bool want_white)
-{
-    char *str;
-
-    if (want_white) {
-        if (token->lnew)
-            vec_char_add(buf, '\n');
-        if (token->lwhite)
-            vec_char_add(buf, ' ');
-    }
-
     switch (token->type) {
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
-        vec_char_addall(buf, token->data, strlen(token->data));
-        break;
     case TK_CHAR_CONST:
-        vec_char_add(buf, '\'');
-        escape_literal(token, buf);
-        vec_char_add(buf, '\'');
-        break;
+    case TK_WCHAR_CONST:
     case TK_STRING_LIT:
-        vec_char_add(buf, '\"');
-        escape_literal(token, buf);
-        vec_char_add(buf, '\"');
-        break;
+    case TK_WSTRING_LIT:
+    case TK_HCHAR_LIT:
+    case TK_QCHAR_LIT:
+        return token->data;
     default:
-        str = punctuator_str[token->type];
-        vec_char_addall(buf, str, strlen(str));
-        break;
+        return punctuator_str[token->type];
     }
 }
 
 void output_token(Token *token)
 {
-    Vec_char buf;
-
-    // Init buffer
-    vec_char_init(&buf);
-    // Vec_charingize token
-    token_to_str(token, &buf, 1);
-    // Print token
-    printf("%s", vec_char_str(&buf));
-    // Free buffer
-    vec_char_free(&buf);
+    if (token->lnew)
+        putchar('\n');
+    if (token->lwhite)
+        putchar(' ');
+    fputs(token_spelling(token), stdout);
 }
 
 Token *stringize(Token *tokens)
 {
     Vec_char buf;
 
-    // Initialize buffer
     vec_char_init(&buf);
-    // Vec_charingize tokens one-by-one
-    for (; tokens; tokens = tokens->next)
-        token_to_str(tokens, &buf, 1);
-    // Add NUL-terminator
-    vec_char_add(&buf, 0);
+    vec_char_add(&buf, '\"');
 
-    // Create string literal token
+    _Bool first = 1;
+    for (; tokens; tokens = tokens->next) {
+        // Add whitespaces if this is not the first token
+        if (first) {
+            first = 0;
+        } else {
+            if (tokens->lnew)
+                vec_char_add(&buf, '\n');
+            if (tokens->lwhite)
+                vec_char_add(&buf, ' ');
+        }
+
+        switch (tokens->type) {
+        case TK_IDENTIFIER:
+        case TK_PP_NUMBER:
+            vec_char_addall(&buf, tokens->data, strlen(tokens->data));
+            break;
+        case TK_CHAR_CONST:
+        case TK_WCHAR_CONST:
+        case TK_STRING_LIT:
+        case TK_WSTRING_LIT:
+        case TK_HCHAR_LIT:
+        case TK_QCHAR_LIT:
+            for (const char *s = tokens->data; *s; ++s)
+                switch (*s) {
+                case '\\':
+                case '\"':
+                    vec_char_add(&buf, '\\');
+                    // FALLTHROUGH
+                default:
+                    vec_char_add(&buf, *s);
+                    break;
+                }
+            break;
+        default:
+            vec_char_addall(&buf, punctuator_str[tokens->type],
+                strlen(punctuator_str[tokens->type]));
+            break;
+        }
+    }
+
+    vec_char_add(&buf, '\"');
     return create_token(TK_STRING_LIT, vec_char_str(&buf));
+}
+
+//
+// Concatenate two strings into a newly-allocated string
+//
+static char *strcat_alloc(const char *s1, const char *s2)
+{
+    size_t l1 = strlen(s1), l2 = strlen(s2);
+    char *result = malloc(l1 + l2 + 1);
+    memcpy(result, s1, l1);
+    memcpy(result + l1, s2, l2);
+    result[l1 + l2] = 0;
+    return result;
 }
 
 Token *glue(Token *left, Token *right)
 {
-    Vec_char buf;
-
     // Placemarker handling
     if (left->type == TK_PLACEMARKER && right->type == TK_PLACEMARKER)
         return create_token(TK_PLACEMARKER, NULL);
@@ -258,14 +225,11 @@ Token *glue(Token *left, Token *right)
     if (right->type == TK_PLACEMARKER)
         return dup_token(left);
 
-    // Initialize buffer
-    vec_char_init(&buf);
-    // Vec_charingize two tokens to buffer
-    token_to_str(left, &buf, 0);
-    token_to_str(right, &buf, 0);
-
+    // Combine the spelling of the two tokens (without whitespaces)
+    char *combined = strcat_alloc(token_spelling(left),
+                                    token_spelling(right));
     // Lex new buffer
-    LexCtx *ctx = lex_open_string(NULL, vec_char_str(&buf));
+    LexCtx *ctx = lex_open_string(NULL, combined);
     Token *result = lex_next(ctx, 0);
     result->lnew = left->lnew;
     result->lwhite = left->lwhite;
@@ -274,7 +238,7 @@ Token *glue(Token *left, Token *right)
         mcc_err("Token concatenation must result in one token");
     // Free buffers
     lex_free(ctx);
-    vec_char_free(&buf);
+    free(combined);
 
     return result;
 }

@@ -226,145 +226,43 @@ static void pp_num(int ch, LexCtx *ctx, Token *token)
         }
 }
 
-static void octal(int ch, LexCtx *ctx, Vec_char *v)
-{
-    ch -= '0';
-    // Octal constants allow 3 digits max
-    switch (lex_peek(ctx)) {
-    case '0' ... '7':
-        ch = ch << 3 | (lex_getc(ctx) - '0');
-        break;
-    default:
-        goto endc;
-    }
-    switch (lex_peek(ctx)) {
-    case '0' ... '7':
-        ch = ch << 3 | (lex_getc(ctx) - '0');
-        break;
-    }
-endc:
-    vec_char_add(v, ch);
+#define GEN_LITERAL(name, tk_type, end)                                        \
+static void name##_literal(int ch, LexCtx *ctx, Token *token)                  \
+{                                                                              \
+    Vec_char buf;                                                              \
+    vec_char_init(&buf);                                                       \
+    vec_char_add(&buf, ch);                                                    \
+    for (;;) {                                                                 \
+        ch = lex_getc(ctx);                                                    \
+        switch (ch) {                                                          \
+        default:                                                               \
+            vec_char_add(&buf, ch);                                            \
+            if (ch == '\\')                                                    \
+                switch (lex_peek(ctx)) {                                       \
+                case '\'':                                                     \
+                case '\"':                                                     \
+                    vec_char_add(&buf, lex_getc(ctx));                         \
+                    break;                                                     \
+                }                                                              \
+            break;                                                             \
+        case end:                                                              \
+            vec_char_add(&buf, ch);                                            \
+            token->type = tk_type;                                             \
+            token->data = vec_char_str(&buf);                                  \
+            return;                                                            \
+        case EOF:                                                              \
+        case '\n':                                                             \
+            mcc_err("Unterminated " # name " literal");                        \
+        }                                                                      \
+    }                                                                          \
 }
 
-static void hexadecimal(int ch, LexCtx *ctx, Vec_char *v)
-{
-    ch = 0;
-    // Hex constants can be any length
-    for (;;)
-        switch (lex_peek(ctx)) {
-        case '0' ... '9':
-            ch = ch << 4 | (lex_getc(ctx) - '0');
-            break;
-        case 'a' ... 'f':
-            ch = ch << 4 | (lex_getc(ctx) - 'a' + 0xa);
-            break;
-        case 'A' ... 'F':
-            ch = ch << 4 | (lex_getc(ctx) - 'A' + 0xa);
-            break;
-        default:
-            goto endloop;
-        }
-endloop:
-    vec_char_add(v, ch);
-}
-
-static void escseq(int ch, LexCtx *ctx, Vec_char *v)
-{
-    switch (ch = lex_getc(ctx)) {
-    case '\'':
-    case '"':
-    case '?':
-    case '\\':
-        vec_char_add(v, ch);
-        break;
-    case 'a':
-        vec_char_add(v, '\a');
-        break;
-    case 'b':
-        vec_char_add(v, '\b');
-        break;
-    case 'f':
-        vec_char_add(v, '\f');
-        break;
-    case 'n':
-        vec_char_add(v, '\n');
-        break;
-    case 'r':
-        vec_char_add(v, '\r');
-        break;
-    case 't':
-        vec_char_add(v, '\t');
-        break;
-    case 'v':
-        vec_char_add(v, '\v');
-        break;
-    case '0' ... '7':
-        octal(ch, ctx, v);
-        break;
-    case 'x':
-        hexadecimal(ch, ctx, v);
-        break;
-    default:
-        // Invalid escape sequence
-        mcc_err("Invalid escape sequence");
-    }
-}
-
-// Literal with escape sequences
-static void literal_esc(int ch, LexCtx *ctx, Token *token, int endch, TokenType type)
-{
-    Vec_char buf;
-    vec_char_init(&buf);
-    for (;;) {
-        ch = lex_getc(ctx);
-        switch (ch) {
-        // Normal character
-        default:
-            // End of literal
-            if (ch == endch) {
-                token->type = type;
-                token->data = vec_char_str(&buf);
-                return;
-            }
-            vec_char_add(&buf, ch);
-            break;
-        // Escape sequence
-        case '\\':
-            escseq(ch, ctx, &buf);
-            break;
-        // Unterminated literal
-        case EOF:
-        case '\n':
-            mcc_err("Unterminated literal");
-        }
-    }
-}
-
-// Literal without escape sequences
-static void literal_unesc(int ch, LexCtx *ctx, Token *token, int endch, TokenType type)
-{
-    Vec_char buf;
-    vec_char_init(&buf);
-    for (;;) {
-        ch = lex_getc(ctx);
-        switch (ch) {
-        // Normal character
-        default:
-            // End of literal
-            if (ch == endch) {
-                token->type = type;
-                token->data = vec_char_str(&buf);
-                return;
-            }
-            vec_char_add(&buf, ch);
-            break;
-        // Unterminated literal
-        case EOF:
-        case '\n':
-            mcc_err("Unterminated literal");
-        }
-    }
-}
+GEN_LITERAL(char,    TK_CHAR_CONST,  '\'')
+GEN_LITERAL(wchar,   TK_WCHAR_CONST, '\'')
+GEN_LITERAL(string,  TK_STRING_LIT,  '\"')
+GEN_LITERAL(wstring, TK_WSTRING_LIT, '\"')
+GEN_LITERAL(hchar,   TK_HCHAR_LIT,   '>')
+GEN_LITERAL(qchar,   TK_QCHAR_LIT,   '\"')
 
 Token *lex_next(LexCtx *ctx, _Bool want_header_name)
 {
@@ -381,6 +279,10 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
 
     retry:
     switch ((ch = lex_getc(ctx))) {
+    // End of file
+    case EOF:
+        free_token(token);
+        return NULL;
     // Invisible whitespaces (carriage return, form feed, vertical tab)
     case '\r':
     case '\f':
@@ -391,10 +293,6 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
     case ' ':
         token->lwhite = 1;
         goto retry;
-    // End of file
-    case EOF:
-        free_token(token);
-        return NULL;
     // End of line
     case '\n':
     newline:
@@ -402,7 +300,7 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
         token->lnew = 1;
         token->directive = 1;
         goto retry;
-    // Line concatanatctxn
+    // Line concatenation
     case '\\':
         if (lex_nextc(ctx, '\n'))
             goto retry;
@@ -411,6 +309,15 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
     case '_':
     case 'a' ... 'z':
     case 'A' ... 'Z':
+        if (ch == 'L')
+            switch (lex_peek(ctx)) {
+            case '\'':
+                wchar_literal(lex_getc(ctx), ctx, token);
+                return token;
+            case '\"':
+                wstring_literal(lex_getc(ctx), ctx, token);
+                return token;
+            }
         identifier(ch, ctx, token);
         return token;
     // PP-number
@@ -419,14 +326,14 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
         return token;
     // Character constant
     case '\'':
-        literal_esc(ch, ctx, token, '\'', TK_CHAR_CONST);
+        char_literal(ch, ctx, token);
         return token;
     // String literal
     case '\"':
         if (want_header_name)
-            literal_unesc(ch, ctx, token, '\"', TK_QCHAR_LIT);
+            qchar_literal(ch, ctx, token);
         else
-            literal_esc(ch, ctx, token, '\"', TK_STRING_LIT);
+            string_literal(ch, ctx, token);
         return token;
     // Punctuators
     case '[':
@@ -465,56 +372,56 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
             pp_num(ch, ctx, token);
             return token;
         }
-        if (lex_nextstr(ctx, ".."))                      // ...
+        if (lex_nextstr(ctx, ".."))                    // ...
             token->type = TK_VARARGS;
         else                                           // .
             token->type = TK_MEMBER;
         return token;
     case '-':
-        if (lex_nextc(ctx, '>'))                          // ->
+        if (lex_nextc(ctx, '>'))                       // ->
             token->type = TK_DEREF_MEMBER;
-        else if (lex_nextc(ctx, '-'))                     // --
+        else if (lex_nextc(ctx, '-'))                  // --
             token->type = TK_MINUS_MINUS;
-        else if (lex_nextc(ctx, '='))                     // -=
+        else if (lex_nextc(ctx, '='))                  // -=
             token->type = TK_SUB_EQUAL;
         else                                           // -
             token->type = TK_MINUS;
         return token;
     case '+':
-        if (lex_nextc(ctx, '+'))                          // ++
+        if (lex_nextc(ctx, '+'))                       // ++
             token->type = TK_PLUS_PLUS;
-        else if (lex_nextc(ctx, '='))                     // +=
+        else if (lex_nextc(ctx, '='))                  // +=
             token->type = TK_ADD_EQUAL;
         else                                           // +
             token->type = TK_PLUS;
         return token;
     case '&':
-        if (lex_nextc(ctx, '&'))                          // &&
+        if (lex_nextc(ctx, '&'))                       // &&
             token->type = TK_LOGIC_AND;
-        else if (lex_nextc(ctx, '='))                     // &=
+        else if (lex_nextc(ctx, '='))                  // &=
             token->type = TK_AND_EQUAL;
         else                                           // &
             token->type = TK_AMPERSAND;
         return token;
     case '*':
-        if (lex_nextc(ctx, '='))                          // *=
+        if (lex_nextc(ctx, '='))                       // *=
             token->type = TK_MUL_EQUAL;
         else                                           // *
             token->type = TK_STAR;
         return token;
     case '!':
-        if (lex_nextc(ctx, '='))                          // !=
+        if (lex_nextc(ctx, '='))                       // !=
             token->type = TK_NOT_EQUAL;
         else                                           // !
             token->type = TK_EXCL_MARK;
         return token;
     case '/':
-        if (lex_nextc(ctx, '/')) {                        // Line comment
+        if (lex_nextc(ctx, '/')) {                     // Line comment
             while (lex_getc(ctx) != '\n');
             goto newline;
         }
 
-        if (lex_nextc(ctx, '*')) {                        // Block comment
+        if (lex_nextc(ctx, '*')) {                     // Block comment
             for (;;) {
                 ch = lex_getc(ctx);
                 if (ch == EOF)
@@ -526,18 +433,18 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
             }
         }
 
-        if (lex_nextc(ctx, '='))                          // /=
+        if (lex_nextc(ctx, '='))                       // /=
             token->type = TK_DIV_EQUAL;
         else                                           // /
             token->type = TK_FWD_SLASH;
         return token;
     case '%':
-        if (lex_nextc(ctx, '=')) {                        // %=
+        if (lex_nextc(ctx, '=')) {                     // %=
             token->type = TK_REM_EQUAL;
-        } else if (lex_nextc(ctx, '>')) {                 // %>
+        } else if (lex_nextc(ctx, '>')) {              // %>
             token->type = TK_RIGHT_CURLY;
         } else if (lex_nextc(ctx, ':')) {
-            if (lex_nextstr(ctx, "%:"))                  // %:%:
+            if (lex_nextstr(ctx, "%:"))                // %:%:
                 token->type = TK_HASH_HASH;
             else                                       // %:
                 token->type = TK_HASH;
@@ -546,21 +453,21 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
         }
         return token;
     case '<':
-        if (want_header_name) {                        // Header name
-            literal_unesc(ch, ctx, token, '>', TK_HCHAR_LIT);
+        if (want_header_name) {                        // System header name
+            hchar_literal(ch, ctx, token);
             return token;
         }
 
         if (lex_nextc(ctx, '<')) {
-            if (lex_nextc(ctx, '='))                      // <<=
+            if (lex_nextc(ctx, '='))                   // <<=
                 token->type = TK_LSHIFT_EQUAL;
             else                                       // <<
                 token->type = TK_LEFT_SHIFT;
-        } else if (lex_nextc(ctx, '=')) {                 // <=
+        } else if (lex_nextc(ctx, '=')) {              // <=
             token->type = TK_LESS_EQUAL;
-        } else if (lex_nextc(ctx, ':')) {                 // <:
+        } else if (lex_nextc(ctx, ':')) {              // <:
             token->type = TK_LEFT_SQUARE;
-        } else if (lex_nextc(ctx, '%')) {                 // <%
+        } else if (lex_nextc(ctx, '%')) {              // <%
             token->type = TK_LEFT_CURLY;
         } else {                                       // <
             token->type = TK_LEFT_ANGLE;
@@ -568,44 +475,44 @@ Token *lex_next(LexCtx *ctx, _Bool want_header_name)
         return token;
     case '>':
         if (lex_nextc(ctx, '>')) {
-            if (lex_nextc(ctx, '='))                      // >>=
+            if (lex_nextc(ctx, '='))                   // >>=
                 token->type = TK_RSHIFT_EQUAL;
             else                                       // >>
                 token->type = TK_RIGHT_SHIFT;
-        } else if (lex_nextc(ctx, '=')) {                 // >=
+        } else if (lex_nextc(ctx, '=')) {              // >=
             token->type = TK_MORE_EQUAL;
         } else {                                       // >
             token->type = TK_RIGHT_ANGLE;
         }
         return token;
     case '=':
-        if (lex_nextc(ctx, '='))                          // ==
+        if (lex_nextc(ctx, '='))                       // ==
             token->type = TK_EQUAL_EQUAL;
         else                                           // =
             token->type = TK_EQUAL;
         return token;
     case '^':
-        if (lex_nextc(ctx, '='))                          // ^=
+        if (lex_nextc(ctx, '='))                       // ^=
             token->type = TK_XOR_EQUAL;
         else                                           // ^
             token->type = TK_CARET;
         return token;
     case '|':
-        if (lex_nextc(ctx, '|'))                          // ||
+        if (lex_nextc(ctx, '|'))                       // ||
             token->type = TK_LOGIC_OR;
-        else if (lex_nextc(ctx, '='))                     // |=
+        else if (lex_nextc(ctx, '='))                  // |=
             token->type = TK_OR_EQUAL;
         else                                           // |
             token->type = TK_VERTICAL_BAR;
         return token;
     case ':':
-        if (lex_nextc(ctx, '>'))                          // :>
+        if (lex_nextc(ctx, '>'))                       // :>
             token->type = TK_RIGHT_SQUARE;
         else                                           // :
             token->type = TK_COLON;
         return token;
     case '#':
-        if (lex_nextc(ctx, '#'))                          // ##
+        if (lex_nextc(ctx, '#'))                       // ##
             token->type = TK_HASH_HASH;
         else                                           // #
             token->type = TK_HASH;

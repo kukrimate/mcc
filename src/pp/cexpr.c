@@ -84,24 +84,109 @@ check_suf:
     mcc_err("Invalid integer constant");
 }
 
+static int octal(int ch, char **str)
+{
+    ch -= '0';
+    // Octal constants allow 3 digits max
+    switch (**str) {
+    case '0' ... '7':
+        ch = ch << 3 | (*(*str)++ - '0');
+        break;
+    default:
+        goto end;
+    }
+    switch (**str) {
+    case '0' ... '7':
+        ch = ch << 3 | (*(*str)++ - '0');
+        break;
+    }
+end:
+    return ch;
+}
+
+static int hexadecimal(int ch, char **str)
+{
+    ch = 0;
+    for (;;) // Hex constants can be any length
+        switch (**str) {
+        case '0' ... '9':
+            ch = ch << 4 | (*(*str)++ - '0');
+            break;
+        case 'a' ... 'f':
+            ch = ch << 4 | (*(*str)++ - 'a' + 0xa);
+            break;
+        case 'A' ... 'F':
+            ch = ch << 4 | (*(*str)++ - 'A' + 0xa);
+            break;
+        default:
+            goto endloop;
+        }
+endloop:
+    return ch;
+}
+
+static int escseq(char **str)
+{
+    int ch = *(*str)++;
+    switch (ch) {
+    case '\'':
+    case '"':
+    case '?':
+    case '\\':
+        return ch;
+    case 'a':
+        return '\a';
+    case 'b':
+        return '\b';
+    case 'f':
+        return '\f';
+    case 'n':
+        return '\n';
+    case 'r':
+        return '\r';
+    case 't':
+        return '\t';
+    case 'v':
+        return '\v';
+    case '0' ... '7':
+        return octal(ch, str);
+    case 'x':
+        return hexadecimal(ch, str);
+    default:
+        mcc_err("Invalid escape sequence");
+    }
+}
+
 // Convert a character constant to a long
 static long read_char(Token *char_const)
 {
-    char *cur;
-    long value;
+    char *str;
+    long val;
 
-    cur = char_const->data;
-    value = 0;
+    str = char_const->data;
+    val = 0;
 
-    // Check for empty char constant
-    if (!*cur)
-        mcc_err("Empty character constant");
+    if (*str++ != '\'') // Must start with '
+        goto err;
+    if (*str == '\'')   // Must not be empty
+        goto err;
 
-    // Read all characters
-    for (; *cur; ++cur)
-        value = value << 8 | *cur;
-
-    return value;
+    for (;;)
+        switch (*str) {
+        default:
+            val = val << 8 | *str++;
+            break;
+        case '\\':
+            ++str;
+            val = val << 8 | escseq(&str);
+            break;
+        case '\'':
+            return val;
+        case 0:         // Must end with '
+            goto err;
+        }
+err:
+    mcc_err("Invalid character constant");
 }
 
 // Return next token if it matches
@@ -200,6 +285,8 @@ long p_unary(Token **tail)
     if ((token = next_tk(tail, TK_PP_NUMBER)))
         return read_number(token);
     if ((token = next_tk(tail, TK_CHAR_CONST)))
+        return read_char(token);
+    if ((token = next_tk(tail, TK_WCHAR_CONST)))
         return read_char(token);
     if (match_tk(tail, TK_PLUS))
         return p_unary(tail);

@@ -21,6 +21,7 @@ static void assert_next_type(LexCtx *ctx, TokenType type)
     free_token(tmp);
 }
 
+#if 0
 static void assert_next_data(LexCtx *ctx, TokenType type, const char *data)
 {
     Token *tmp;
@@ -29,6 +30,7 @@ static void assert_next_data(LexCtx *ctx, TokenType type, const char *data)
     assert(tmp && tmp->type == type && !strcmp(tmp->data, data));
     free_token(tmp);
 }
+#endif
 
 static void assert_next_space(LexCtx *ctx, _Bool lnew, _Bool lwhite)
 {
@@ -57,21 +59,6 @@ static void test_ppnum(void)
     for (i = 0; i < 9; ++i)
         assert_next_type(ctx, TK_PP_NUMBER);
 
-    assert_next_null(ctx);
-    lex_free(ctx);
-}
-
-// Escape sequences
-static void test_esc(void)
-{
-    LexCtx *ctx = lex_open_string("test_esc.c",
-        "\"\\' \\\" \\? \\\\ \\a \\b \\f \\n \\r \\t \\v \\x7a \\122\" "
-        "'0 1 2 3 4 5 6 7 8 9 \\x41 \\x42 \\x43 \\x44 E F'");
-
-    assert_next_data(ctx,
-            TK_STRING_LIT, "\' \" \? \\ \a \b \f \n \r \t \v z R");
-    assert_next_data(ctx,
-            TK_CHAR_CONST, "0 1 2 3 4 5 6 7 8 9 A B C D E F");
     assert_next_null(ctx);
     lex_free(ctx);
 }
@@ -141,7 +128,6 @@ static void test_spacing(void)
 int main(void)
 {
     test_ppnum();
-    test_esc();
     test_punct();
     test_spacing();
 }

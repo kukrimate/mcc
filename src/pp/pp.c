@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * Preprocessor
- */
+//
+// Preprocessor
+//
 
 #include <assert.h>
 #include <stdarg.h>
@@ -1095,22 +1095,26 @@ static void dir_include(PpContext *ctx)
         pp_err(ctx, "Missing header name from #include");
     ctx->header_name = 0;
 
+    char *name = hname->data + 1;
+    name = strndup(name, strlen(name) - 1);
+
     switch (hname->type) {
     case TK_HCHAR_LIT:
-        lex = open_system_header(ctx, hname->data);
+        lex = open_system_header(ctx, name);
         break;
     case TK_QCHAR_LIT:
-        lex = open_local_header(ctx, hname->data);
+        lex = open_local_header(ctx, name);
         break;
     default:
         pp_err(ctx, "Invalid header name");
         break;
     }
+    free_token(hname);
 
     if (!lex)
-        pp_err(ctx, "Can't locate header file: %s", hname->data);
+        pp_err(ctx, "Can't locate header file: %s", name);
 
-    free_token(hname);
+    free(name);
     pp_push_lex_frame(ctx, lex);
 }
 

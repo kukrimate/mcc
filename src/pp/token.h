@@ -4,19 +4,17 @@
 #define TOKEN_H
 
 typedef enum {
-    // Header names
-    TK_HCHAR_LIT,
-    TK_QCHAR_LIT,
+    TK_IDENTIFIER,      // Identifiers
+    TK_PP_NUMBER,       // Pre-processing numbers
 
-    // Identifier
-    TK_IDENTIFIER,
+    TK_CHAR_CONST,      // Character ''
+    TK_WCHAR_CONST,     // Wide character L''
+    TK_STRING_LIT,      // String ""
+    TK_WSTRING_LIT,     // Wide string L""
 
-    // Constants
-    TK_PP_NUMBER,
-    TK_CHAR_CONST,
-    TK_STRING_LIT,
+    TK_HCHAR_LIT,       // System header <>
+    TK_QCHAR_LIT,       // Local header ""
 
-    // Punctuators
     TK_LEFT_SQUARE,     // [
     TK_RIGHT_SQUARE,    // ]
     TK_LEFT_PAREN,      // (
@@ -66,8 +64,9 @@ typedef enum {
     TK_HASH,            // #
     TK_HASH_HASH,       // ##
 
-    // Placemarker (used when applying the ## opeartor)
-    TK_PLACEMARKER,
+    TK_PP_OTHER,        // Any other character
+
+    TK_PLACEMARKER,     // Placemarker (used when applying the ## opeartor)
 } TokenType;
 
 // Token type

@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * Standalone C pre-processor
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <getopt.h>

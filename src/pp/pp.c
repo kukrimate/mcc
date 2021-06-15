@@ -12,7 +12,6 @@
 #include "token.h"
 #include "lex.h"
 #include "cexpr.h"
-#include "search.h"
 #include "pp.h"
 
 typedef enum {
@@ -89,8 +88,6 @@ struct Cond {
 struct PpContext {
     // Header search directories
     Vec_cstr search_dirs;
-    // Enable header name mode?
-    _Bool header_name;
     // Preprocessor frames
     Frame *frames;
     // Defined macros
@@ -108,7 +105,7 @@ static void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ..
     }
 
     fflush(stdout);
-    fprintf(stderr, "\nError in: %s:%ld: ", lex_filename(file_frame->lex),
+    fprintf(stderr, "\nError in: %s:%ld: ", lex_path(file_frame->lex),
         lex_line(file_frame->lex));
     va_list ap;
     va_start(ap, err);
@@ -179,7 +176,7 @@ recurse:
             frame->prev = NULL;
         } else {
             // Read token directly from lexer
-            token = lex_next(frame->lex, ctx->header_name);
+            token = lex_next(frame->lex);
             if (!token) {
                 // Remove frame
                 drop_frame(ctx);
@@ -225,7 +222,7 @@ recurse:
             token = frame->prev;
         } else {
             // Fill frame->prev if it doesn't exist
-            token = frame->prev = lex_next(frame->lex, ctx->header_name);
+            token = frame->prev = lex_next(frame->lex);
             if (!token) {
                 // Peek at next frame
                 frame = frame->next;
@@ -252,7 +249,7 @@ static Token *pp_readline(PpContext *ctx)
     Token *token;
 
     token = pp_peek(ctx);
-    if (token && !token->lnew)
+    if (token && !token->flags.lnew)
         return pp_read(ctx);
     return NULL;
 }
@@ -478,7 +475,7 @@ static Token *pp_subst(PpContext *ctx, Macro *macro, Token **actuals)
                     break;
                 // Inherit spacing from replacement list
                 if (first)
-                    tmp->lwhite = replace->token->lwhite;
+                    tmp->flags.lwhite = replace->token->flags.lwhite;
                 // Add token
                 if (*tail)
                     tail = &(*tail)->next;
@@ -498,7 +495,7 @@ static Token *pp_subst(PpContext *ctx, Macro *macro, Token **actuals)
                 }
             } else {
                 // Add placemarker if actual parameter is empty
-                tmp = create_token(TK_PLACEMARKER, NULL);
+                tmp = create_token(TK_PLACEMARKER, TOKEN_NOFLAGS, NULL);
                 glue_tmp
             }
             break;
@@ -522,38 +519,38 @@ typedef struct {
 static void handle_date(PpContext *ctx)
 {
     pp_push_list_frame(ctx, NULL,
-        create_token(TK_PP_NUMBER, strdup("Mar  7 2021")));
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("Mar  7 2021")));
 }
 
 
 static void handle_time(PpContext *ctx)
 {
     pp_push_list_frame(ctx, NULL,
-        create_token(TK_STRING_LIT, strdup("15:30:07")));
+        create_token(TK_STRING_LIT, TOKEN_NOFLAGS, strdup("15:30:07")));
 }
 
 static void handle_file(PpContext *ctx)
 {
     pp_push_list_frame(ctx, NULL,
-        create_token(TK_STRING_LIT, strdup("unknown")));
+        create_token(TK_STRING_LIT, TOKEN_NOFLAGS, strdup("unknown")));
 }
 
 static void handle_line(PpContext *ctx)
 {
     pp_push_list_frame(ctx, NULL,
-        create_token(TK_STRING_LIT, strdup("1")));
+        create_token(TK_STRING_LIT, TOKEN_NOFLAGS, strdup("1")));
 }
 
 static void handle_one(PpContext *ctx)
 {
     pp_push_list_frame(ctx, NULL,
-     create_token(TK_PP_NUMBER, strdup("1")));
+     create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
 }
 
 static void handle_vers(PpContext *ctx)
 {
     pp_push_list_frame(ctx, NULL,
-     create_token(TK_PP_NUMBER, strdup("199901L")));
+     create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("199901L")));
 }
 
 // Pre-defined macros
@@ -597,7 +594,7 @@ recurse:
         goto retry_inherit_space;
 
     // Check for pre-processing directive
-    if (identifier->type == TK_HASH && identifier->directive) {
+    if (identifier->type == TK_HASH && identifier->flags.directive) {
         handle_directive(ctx);
         goto retry_free;
     }
@@ -615,7 +612,7 @@ recurse:
     }
 
     // Check if token has the no expand flag set
-    if (identifier->no_expand)
+    if (identifier->flags.no_expand)
         return identifier;
     // See if the identifier is a macro name
     macro = find_macro(ctx, identifier);
@@ -624,7 +621,7 @@ recurse:
 
     // If macro is disabled here, this identifier can *never* expand again
     if (!macro->enabled) {
-        identifier->no_expand = 1;
+        identifier->flags.no_expand = 1;
         return identifier;
     }
 
@@ -656,8 +653,8 @@ recurse:
 retry_inherit_space:
     // Next token on the stream inherits our spacing
     if ((last = pp_peek(ctx))) {
-        last->lnew = identifier->lnew;
-        last->lwhite = identifier->lwhite;
+        last->flags.lnew = identifier->flags.lnew;
+        last->flags.lwhite = identifier->flags.lwhite;
     }
 retry_free:
     // Free identifier
@@ -710,7 +707,7 @@ want_ident:
     // Variable argument mode
     if (tmp->type == TK_VARARGS) {
         free_token(tmp);
-        tmp = create_token(TK_IDENTIFIER, strdup("__VA_ARGS__"));
+        tmp = create_token(TK_IDENTIFIER, TOKEN_NOFLAGS, strdup("__VA_ARGS__"));
         macro->has_varargs = 1;
     }
     // Must be an identifier
@@ -829,7 +826,7 @@ static void dir_define(PpContext *ctx)
 
     // Check for macro type
     tmp = pp_peek(ctx);
-    if (tmp && tmp->type == TK_LEFT_PAREN && !tmp->lwhite) {
+    if (tmp && tmp->type == TK_LEFT_PAREN && !tmp->flags.lwhite) {
         // Function like macro
         macro->function_like = 1;
         capture_formals(ctx, macro);
@@ -902,9 +899,9 @@ static _Bool is_cexpr(PpContext *ctx)
             result = is_predef(*tail) || find_macro(ctx, *tail);
             free_token(*tail);
             if (result)
-                *tail = create_token(TK_PP_NUMBER, strdup("1"));
+                *tail = create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1"));
             else
-                *tail = create_token(TK_PP_NUMBER, strdup("0"));
+                *tail = create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("0"));
 
             // Make sure we have right parenthesis if needed
             if (want_paren) {
@@ -928,7 +925,7 @@ static _Bool is_cexpr(PpContext *ctx)
         // Replace un-replaced identifiers with 0
         if ((*tail)->type == TK_IDENTIFIER) {
             free_token(*tail);
-            *tail = create_token(TK_PP_NUMBER, strdup("0"));
+            *tail = create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("0"));
         }
         tail = &(*tail)->next;
     }
@@ -956,7 +953,7 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
             goto err;
 
         // Nested directive
-        if (tmp->type == TK_HASH && tmp->directive) {
+        if (tmp->type == TK_HASH && tmp->flags.directive) {
             // Read directive name
             free_token(tmp);
             tmp = pp_read(ctx);
@@ -964,7 +961,7 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
                 goto err;
 
             // We don't care about empty or invalid directives here
-            if (tmp->lnew || tmp->type != TK_IDENTIFIER)
+            if (tmp->flags.lnew || tmp->type != TK_IDENTIFIER)
                 continue;
 
             // Check for nested #else or #elif if at the correct nesting level
@@ -1083,39 +1080,61 @@ static LexCtx *open_local_header(PpContext *ctx, const char *name)
     return lex;
 }
 
+static char *read_hchar(PpContext *ctx)
+{
+    Token *head = NULL;
+
+    for (Token **tail = &head;; tail = &(*tail)->next) {
+        *tail = pp_readline(ctx);
+        if (*tail == NULL)
+            pp_err(ctx, "System header name must end with >");
+        if ((*tail)->type == TK_RIGHT_ANGLE) {
+            free_token(*tail);
+            *tail = NULL;
+            break;
+        }
+    }
+    char *hchar_str = concat_spellings(head);
+    while (head) {
+        Token *tmp = head->next;
+        free_token(head);
+        head = tmp;
+    }
+    return hchar_str;
+}
+
 // #include directive
 static void dir_include(PpContext *ctx)
 {
-    Token  *hname;
+    Token *token = pp_readline(ctx);
+    if (!token)
+        pp_err(ctx, "Missing header name from #include");
+
+    char *name;
     LexCtx *lex;
 
-    ctx->header_name = 1;
-    hname = pp_readline(ctx);
-    if (!hname)
-        pp_err(ctx, "Missing header name from #include");
-    ctx->header_name = 0;
-
-    char *name = hname->data + 1;
-    name = strndup(name, strlen(name) - 1);
-
-    switch (hname->type) {
-    case TK_HCHAR_LIT:
+    switch (token->type) {
+    case TK_LEFT_ANGLE:
+        name = read_hchar(ctx);
         lex = open_system_header(ctx, name);
         break;
-    case TK_QCHAR_LIT:
+    case TK_STRING_LIT:
+        if (*token->data == 'L')
+            pp_err(ctx, "Wide string literal can't be used as a header name");
+        name = strndup(token->data + 1, strlen(token->data) - 2);
         lex = open_local_header(ctx, name);
         break;
     default:
+        // TODO: support re-checking header name after macro expansion
         pp_err(ctx, "Invalid header name");
-        break;
     }
-    free_token(hname);
+    free_token(token);
 
     if (!lex)
         pp_err(ctx, "Can't locate header file: %s", name);
 
-    free(name);
     pp_push_lex_frame(ctx, lex);
+    // TODO: make lexer free header name string
 }
 
 void handle_directive(PpContext *ctx)

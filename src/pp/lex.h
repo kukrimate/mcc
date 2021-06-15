@@ -8,17 +8,17 @@ typedef struct LexCtx LexCtx;
 //
 // Open a lexer context for a file
 //
-LexCtx *lex_open_file(const char *filepath);
+LexCtx *lex_open_file(const char *path);
 
 //
 // Open a lexer context for an in-memory string
 //
-LexCtx *lex_open_string(const char *filename, const char *str);
+LexCtx *lex_open_string(const char *path, const char *str);
 
 //
-// Get the current file's name
+// Get the currently lexed file's path
 //
-const char *lex_filename(LexCtx *ctx);
+const char *lex_path(LexCtx *ctx);
 
 //
 // Get the current line in the file
@@ -33,6 +33,6 @@ void lex_free(LexCtx *ctx);
 //
 // Obtain the next token from the lexer
 //
-Token *lex_next(LexCtx *ctx, _Bool want_header_name);
+Token *lex_next(LexCtx *ctx);
 
 #endif

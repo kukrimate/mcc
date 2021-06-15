@@ -166,6 +166,8 @@ static long read_char(Token *char_const)
     str = char_const->data;
     val = 0;
 
+    if (*str == 'L')    // Optional L prefix
+        ++str;
     if (*str++ != '\'') // Must start with '
         goto err;
     if (*str == '\'')   // Must not be empty
@@ -285,8 +287,6 @@ long p_unary(Token **tail)
     if ((token = next_tk(tail, TK_PP_NUMBER)))
         return read_number(token);
     if ((token = next_tk(tail, TK_CHAR_CONST)))
-        return read_char(token);
-    if ((token = next_tk(tail, TK_WCHAR_CONST)))
         return read_char(token);
     if (match_tk(tail, TK_PLUS))
         return p_unary(tail);

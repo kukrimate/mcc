@@ -16,34 +16,23 @@ static void assert_next_type(LexCtx *ctx, TokenType type)
 {
     Token *tmp;
 
-    tmp = lex_next(ctx, 0);
+    tmp = lex_next(ctx);
     assert(tmp && tmp->type == type);
     free_token(tmp);
 }
-
-#if 0
-static void assert_next_data(LexCtx *ctx, TokenType type, const char *data)
-{
-    Token *tmp;
-
-    tmp = lex_next(ctx, 0);
-    assert(tmp && tmp->type == type && !strcmp(tmp->data, data));
-    free_token(tmp);
-}
-#endif
 
 static void assert_next_space(LexCtx *ctx, _Bool lnew, _Bool lwhite)
 {
     Token *tmp;
 
-    tmp = lex_next(ctx, 0);
-    assert(tmp && tmp->lnew == lnew && tmp->lwhite == lwhite);
+    tmp = lex_next(ctx);
+    assert(tmp && tmp->flags.lnew == lnew && tmp->flags.lwhite == lwhite);
     free_token(tmp);
 }
 
 static void assert_next_null(LexCtx *ctx)
 {
-    assert(lex_next(ctx, 0) == NULL);
+    assert(lex_next(ctx) == NULL);
 }
 
 // Test pre-processing numbers

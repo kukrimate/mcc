@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * Lexical analyzer
- */
+//
+// Lexical analyzer
+//
 
 #include <assert.h>
 #include <stdio.h>
 #include <lib/vec.h>
 #include "token.h"
 #include "lex.h"
-#include "err.h"
 
 typedef enum {
     LEX_FILE,
@@ -17,8 +16,8 @@ typedef enum {
 } LexType;
 
 struct LexCtx {
-    // Name of the current file
-    const char *filename;
+    // Path to the current file
+    const char *path;
     // Line number in the current file
     size_t line;
     // Is this the first token read from the context?
@@ -30,50 +29,105 @@ struct LexCtx {
         FILE *fp;
         const char *str;
     };
+
+    // Buffered characters
+    int ch1, ch2;
 };
 
-static const char *get_filename(const char *filepath)
+//
+// Read the next character
+//
+static int lex_readc(LexCtx *ctx)
 {
-    const char *prev = filepath, *next;
-    while ((next = strchr(prev, '/')))
-        prev = next + 1;
-    return prev;
+    if (ctx->type == LEX_STR) {
+        if (ctx->str[0] == '\\' && ctx->str[1] == '\n')
+            ctx->str += 2;
+        if (*ctx->str)
+            return *ctx->str++;
+        return EOF;
+    } else {
+        int ch1 = fgetc(ctx->fp);
+        if (ch1 == '\\') {
+            int ch2 = fgetc(ctx->fp);
+            if (ch2 == '\n')
+                return fgetc(ctx->fp);
+            ungetc(ch2, ctx->fp);
+        }
+        return ch1;
+    }
 }
 
-LexCtx *lex_open_file(const char *filepath)
+//
+// Forward the stored characters
+//
+static void lex_fwd(LexCtx *ctx)
 {
-    FILE *fp = fopen(filepath, "r");
+    ctx->ch1 = ctx->ch2;
+    ctx->ch2 = lex_readc(ctx);
+}
+
+//
+// Match against one stored character
+//
+static _Bool lex_match1(LexCtx *ctx, int want)
+{
+    if (ctx->ch1 == want) {
+        lex_fwd(ctx);
+        return 1;
+    }
+    return 0;
+}
+
+//
+// Match against two stored characters
+//
+static _Bool lex_match2(LexCtx *ctx, int want1, int want2)
+{
+    if (ctx->ch1 == want1 && ctx->ch2 == want2) {
+        lex_fwd(ctx);
+        lex_fwd(ctx);
+        return 1;
+    }
+    return 0;
+}
+
+LexCtx *lex_open_file(const char *path)
+{
+    FILE *fp = fopen(path, "r");
     if (!fp)
         return NULL;
 
     LexCtx *ctx = calloc(1, sizeof *ctx);
-    ctx->filename = get_filename(filepath);
+    ctx->path = path;
     ctx->line = 1;
     ctx->first = 1;
 
     ctx->type = LEX_FILE;
     ctx->fp = fp;
+
+    ctx->ch1 = lex_readc(ctx);
+    ctx->ch2 = lex_readc(ctx);
     return ctx;
 }
 
-LexCtx *lex_open_string(const char *filename, const char *str)
+LexCtx *lex_open_string(const char *path, const char *str)
 {
     LexCtx *ctx = calloc(1, sizeof *ctx);
-    ctx->filename = filename;
+    ctx->path = path;
     ctx->line = 1;
     ctx->first = 1;
 
     ctx->type = LEX_STR;
     ctx->str = str;
+
+    ctx->ch1 = lex_readc(ctx);
+    ctx->ch2 = lex_readc(ctx);
     return ctx;
 }
 
-const char *lex_filename(LexCtx *ctx)
+const char *lex_path(LexCtx *ctx)
 {
-    // This API is only allowed to be called when a filename was specified
-    assert(ctx->filename != NULL);
-
-    return ctx->filename;
+    return ctx->path;
 }
 
 size_t lex_line(LexCtx *ctx)
@@ -88,437 +142,342 @@ void lex_free(LexCtx *ctx)
     free(ctx);
 }
 
-static int lex_getc(LexCtx *ctx)
-{
-    int ch = 0; // NOTE: initialization not needed
-                // but GCC is not smart enough to tell
-
-    switch (ctx->type) {
-    case LEX_STR:
-        ch = *ctx->str;
-        if (!ch) {
-            // Translate NUL-to EOF
-            ch = EOF;
-        } else {
-            // Advance string to next character
-            ++ctx->str;
-        }
-        break;
-    case LEX_FILE:
-        // Read character from stream
-        ch = fgetc(ctx->fp);
-        break;
-    }
-
-    return ch;
-}
-
-static void lex_ungetc(int ch, LexCtx *ctx)
-{
-    // Ungetting EOF is pointless
-    if (ch == EOF)
-        return;
-
-    switch (ctx->type) {
-    case LEX_STR:
-        // Make sure this is used correctly
-        assert(*--ctx->str == ch);
-        break;
-    case LEX_FILE:
-        // Push character back to stream
-        ungetc(ch, ctx->fp);
-        break;
-    }
-}
-
-static int lex_peek(LexCtx *ctx)
-{
-    int ch;
-
-    ch = lex_getc(ctx);
-    lex_ungetc(ch, ctx);
-    return ch;
-}
-
-static _Bool lex_nextc(LexCtx *ctx, int want)
-{
-    int ch;
-
-    ch = lex_getc(ctx);
-    if (ch != want) {
-        lex_ungetc(ch, ctx);
-        return 0;
-    }
-    return 1;
-}
-
-static _Bool lex_nextstr(LexCtx *ctx, const char *want)
-{
-    int ch;
-    const char *cur;
-
-    for (cur = want; *cur; ++cur) {
-        ch = lex_getc(ctx);
-        if (ch != *cur) {
-            lex_ungetc(ch, ctx);
-            while (cur > want)
-                lex_ungetc(*--cur, ctx);
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static void identifier(int ch, LexCtx *ctx, Token *token)
+static char *identifier(LexCtx *ctx)
 {
     Vec_char buf;
 
     vec_char_init(&buf);
-    vec_char_add(&buf, ch);
 
-    for (;;)
-        switch (lex_peek(ctx)) {
+    for (;; lex_fwd(ctx))
+        switch (ctx->ch1) {
         case '_':
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            vec_char_add(&buf, lex_getc(ctx));
+            vec_char_add(&buf, ctx->ch1);
             break;
         default:
-            token->type = TK_IDENTIFIER;
-            token->data = vec_char_str(&buf);
-            return;
+            return vec_char_str(&buf);
         }
 }
 
-static void pp_num(int ch, LexCtx *ctx, Token *token)
+static char *pp_num(LexCtx *ctx)
 {
     Vec_char buf;
 
     vec_char_init(&buf);
-    vec_char_add(&buf, ch);
 
-    for (;;)
-        switch (lex_peek(ctx)) {
+    for (;; lex_fwd(ctx))
+        switch (ctx->ch1) {
         case '.':
         case '_':
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            ch = lex_getc(ctx);
-            vec_char_add(&buf, ch);
-            switch (ch) {
+            vec_char_add(&buf, ctx->ch1);
+            switch (ctx->ch1) {
             case 'e':
             case 'E':
             case 'p':
             case 'P':
-                switch (lex_peek(ctx)) {
+                switch (ctx->ch2) {
                 case '-':
                 case '+':
-                    vec_char_add(&buf, lex_getc(ctx));
+                    vec_char_add(&buf, ctx->ch2);
+                    lex_fwd(ctx);
                 }
             }
             break;
         default:
-            token->type = TK_PP_NUMBER;
-            token->data = vec_char_str(&buf);
-            return;
+            return vec_char_str(&buf);
         }
 }
 
-#define GEN_LITERAL(name, tk_type, end)                                        \
-static void name##_literal(int ch, LexCtx *ctx, Token *token)                  \
-{                                                                              \
-    Vec_char buf;                                                              \
-    vec_char_init(&buf);                                                       \
-    vec_char_add(&buf, ch);                                                    \
-    for (;;) {                                                                 \
-        ch = lex_getc(ctx);                                                    \
-        switch (ch) {                                                          \
-        default:                                                               \
-            vec_char_add(&buf, ch);                                            \
-            if (ch == '\\')                                                    \
-                switch (lex_peek(ctx)) {                                       \
-                case '\'':                                                     \
-                case '\"':                                                     \
-                    vec_char_add(&buf, lex_getc(ctx));                         \
-                    break;                                                     \
-                }                                                              \
-            break;                                                             \
-        case end:                                                              \
-            vec_char_add(&buf, ch);                                            \
-            token->type = tk_type;                                             \
-            token->data = vec_char_str(&buf);                                  \
-            return;                                                            \
-        case EOF:                                                              \
-        case '\n':                                                             \
-            mcc_err("Unterminated " # name " literal");                        \
-        }                                                                      \
-    }                                                                          \
+static char *char_const(LexCtx *ctx)
+{
+    Vec_char buf;
+    vec_char_init(&buf);
+
+    if (lex_match1(ctx, 'L'))
+        vec_char_add(&buf, 'L');
+
+    vec_char_add(&buf, ctx->ch1);
+    lex_fwd(ctx);
+
+    for (;;) {
+        if (ctx->ch1 == '\n' || ctx->ch1 == EOF) {
+            fprintf(stderr, "Warning: Unterminated character constant\n");
+            return vec_char_str(&buf);
+        }
+
+        if (lex_match2(ctx, '\\', '\'')) {
+            vec_char_add(&buf, '\\');
+            vec_char_add(&buf, '\'');
+            continue;
+        }
+
+        if (lex_match1(ctx, '\'')) {
+            vec_char_add(&buf, '\'');
+            return vec_char_str(&buf);
+        }
+
+        vec_char_add(&buf, ctx->ch1);
+        lex_fwd(ctx);
+    }
 }
 
-GEN_LITERAL(char,    TK_CHAR_CONST,  '\'')
-GEN_LITERAL(wchar,   TK_WCHAR_CONST, '\'')
-GEN_LITERAL(string,  TK_STRING_LIT,  '\"')
-GEN_LITERAL(wstring, TK_WSTRING_LIT, '\"')
-GEN_LITERAL(hchar,   TK_HCHAR_LIT,   '>')
-GEN_LITERAL(qchar,   TK_QCHAR_LIT,   '\"')
-
-Token *lex_next(LexCtx *ctx, _Bool want_header_name)
+static char *string_literal(LexCtx *ctx)
 {
-    Token *token;
-    int ch;
+    Vec_char buf;
+    vec_char_init(&buf);
 
-    token = create_token(0, NULL);
+    if (lex_match1(ctx, 'L'))
+        vec_char_add(&buf, 'L');
 
-    // First token from a lexer context can be a directive
+    vec_char_add(&buf, ctx->ch1);
+    lex_fwd(ctx);
+
+    for (;;) {
+        if (ctx->ch1 == '\n' || ctx->ch1 == EOF) {
+            fprintf(stderr, "Warning: Unterminated character constant\n");
+            return vec_char_str(&buf);
+        }
+
+        if (lex_match2(ctx, '\\', '\"')) {
+            vec_char_add(&buf, '\\');
+            vec_char_add(&buf, '\"');
+            continue;
+        }
+
+        if (lex_match1(ctx, '\"')) {
+            vec_char_add(&buf, '\"');
+            return vec_char_str(&buf);
+        }
+
+        vec_char_add(&buf, ctx->ch1);
+        lex_fwd(ctx);
+    }
+}
+
+static char *other(LexCtx *ctx)
+{
+    char ch = ctx->ch1;
+    lex_fwd(ctx);
+    return strndup(&ch, 1);
+}
+
+Token *lex_next(LexCtx *ctx)
+{
+    TokenFlags flags = TOKEN_NOFLAGS;
+
     if (ctx->first) {
-        token->directive = 1;
         ctx->first = 0;
+        flags.directive = 1;
     }
 
-    retry:
-    switch ((ch = lex_getc(ctx))) {
-    // End of file
-    case EOF:
-        free_token(token);
-        return NULL;
-    // Invisible whitespaces (carriage return, form feed, vertical tab)
-    case '\r':
-    case '\f':
-    case '\v':
-        goto retry;
-    // Visible whitespaces (tabs, spaces)
-    case '\t':
-    case ' ':
-        token->lwhite = 1;
-        goto retry;
-    // End of line
-    case '\n':
-    newline:
-        token->lwhite = 0;
-        token->lnew = 1;
-        token->directive = 1;
-        goto retry;
-    // Line concatenation
-    case '\\':
-        if (lex_nextc(ctx, '\n'))
-            goto retry;
-        break;
-    // Identifier
+retry:
+    switch (ctx->ch1) {
     case '_':
     case 'a' ... 'z':
     case 'A' ... 'Z':
-        if (ch == 'L')
-            switch (lex_peek(ctx)) {
-            case '\'':
-                wchar_literal(lex_getc(ctx), ctx, token);
-                return token;
-            case '\"':
-                wstring_literal(lex_getc(ctx), ctx, token);
-                return token;
-            }
-        identifier(ch, ctx, token);
-        return token;
-    // PP-number
-    case '0' ... '9':
-        pp_num(ch, ctx, token);
-        return token;
-    // Character constant
-    case '\'':
-        char_literal(ch, ctx, token);
-        return token;
-    // String literal
-    case '\"':
-        if (want_header_name)
-            qchar_literal(ch, ctx, token);
-        else
-            string_literal(ch, ctx, token);
-        return token;
-    // Punctuators
-    case '[':
-        token->type = TK_LEFT_SQUARE;
-        return token;
-    case ']':
-        token->type = TK_RIGHT_SQUARE;
-        return token;
-    case '(':
-        token->type = TK_LEFT_PAREN;
-        return token;
-    case ')':
-        token->type = TK_RIGHT_PAREN;
-        return token;
-    case '{':
-        token->type = TK_LEFT_CURLY;
-        return token;
-    case '}':
-        token->type = TK_RIGHT_CURLY;
-        return token;
-    case '~':
-        token->type = TK_TILDE;
-        return token;
-    case '?':
-        token->type = TK_QUEST_MARK;
-        return token;
-    case ';':
-        token->type = TK_SEMICOLON;
-        return token;
-    case ',':
-        token->type = TK_COMMA;
-        return token;
+        if (ctx->ch1 == 'L') {
+            if (ctx->ch2 == '\'')
+                return create_token(TK_CHAR_CONST, flags, char_const(ctx));
+            if (ctx->ch2 == '\"')
+                return create_token(TK_STRING_LIT, flags, string_literal(ctx));
+        }
+        return create_token(TK_IDENTIFIER, flags, identifier(ctx));
     case '.':
-        switch (lex_peek(ctx)) {
-        case '0' ... '9':                              // PP-num
-            pp_num(ch, ctx, token);
-            return token;
+        switch (ctx->ch2) {
+        case '0' ... '9':
+            return create_token(TK_PP_NUMBER, flags, pp_num(ctx));
         }
-        if (lex_nextstr(ctx, ".."))                    // ...
-            token->type = TK_VARARGS;
-        else                                           // .
-            token->type = TK_MEMBER;
-        return token;
-    case '-':
-        if (lex_nextc(ctx, '>'))                       // ->
-            token->type = TK_DEREF_MEMBER;
-        else if (lex_nextc(ctx, '-'))                  // --
-            token->type = TK_MINUS_MINUS;
-        else if (lex_nextc(ctx, '='))                  // -=
-            token->type = TK_SUB_EQUAL;
-        else                                           // -
-            token->type = TK_MINUS;
-        return token;
-    case '+':
-        if (lex_nextc(ctx, '+'))                       // ++
-            token->type = TK_PLUS_PLUS;
-        else if (lex_nextc(ctx, '='))                  // +=
-            token->type = TK_ADD_EQUAL;
-        else                                           // +
-            token->type = TK_PLUS;
-        return token;
-    case '&':
-        if (lex_nextc(ctx, '&'))                       // &&
-            token->type = TK_LOGIC_AND;
-        else if (lex_nextc(ctx, '='))                  // &=
-            token->type = TK_AND_EQUAL;
-        else                                           // &
-            token->type = TK_AMPERSAND;
-        return token;
-    case '*':
-        if (lex_nextc(ctx, '='))                       // *=
-            token->type = TK_MUL_EQUAL;
-        else                                           // *
-            token->type = TK_STAR;
-        return token;
-    case '!':
-        if (lex_nextc(ctx, '='))                       // !=
-            token->type = TK_NOT_EQUAL;
-        else                                           // !
-            token->type = TK_EXCL_MARK;
-        return token;
-    case '/':
-        if (lex_nextc(ctx, '/')) {                     // Line comment
-            while (lex_getc(ctx) != '\n');
-            goto newline;
-        }
-
-        if (lex_nextc(ctx, '*')) {                     // Block comment
-            for (;;) {
-                ch = lex_getc(ctx);
-                if (ch == EOF)
-                    mcc_err("Unterminated block comment");
-                if (ch == '*' && lex_nextc(ctx, '/')) {
-                    token->lwhite = 1;
-                    goto retry;
-                }
-            }
-        }
-
-        if (lex_nextc(ctx, '='))                       // /=
-            token->type = TK_DIV_EQUAL;
-        else                                           // /
-            token->type = TK_FWD_SLASH;
-        return token;
-    case '%':
-        if (lex_nextc(ctx, '=')) {                     // %=
-            token->type = TK_REM_EQUAL;
-        } else if (lex_nextc(ctx, '>')) {              // %>
-            token->type = TK_RIGHT_CURLY;
-        } else if (lex_nextc(ctx, ':')) {
-            if (lex_nextstr(ctx, "%:"))                // %:%:
-                token->type = TK_HASH_HASH;
-            else                                       // %:
-                token->type = TK_HASH;
-        } else {                                       // %
-            token->type = TK_PERCENT;
-        }
-        return token;
-    case '<':
-        if (want_header_name) {                        // System header name
-            hchar_literal(ch, ctx, token);
-            return token;
-        }
-
-        if (lex_nextc(ctx, '<')) {
-            if (lex_nextc(ctx, '='))                   // <<=
-                token->type = TK_LSHIFT_EQUAL;
-            else                                       // <<
-                token->type = TK_LEFT_SHIFT;
-        } else if (lex_nextc(ctx, '=')) {              // <=
-            token->type = TK_LESS_EQUAL;
-        } else if (lex_nextc(ctx, ':')) {              // <:
-            token->type = TK_LEFT_SQUARE;
-        } else if (lex_nextc(ctx, '%')) {              // <%
-            token->type = TK_LEFT_CURLY;
-        } else {                                       // <
-            token->type = TK_LEFT_ANGLE;
-        }
-        return token;
-    case '>':
-        if (lex_nextc(ctx, '>')) {
-            if (lex_nextc(ctx, '='))                   // >>=
-                token->type = TK_RSHIFT_EQUAL;
-            else                                       // >>
-                token->type = TK_RIGHT_SHIFT;
-        } else if (lex_nextc(ctx, '=')) {              // >=
-            token->type = TK_MORE_EQUAL;
-        } else {                                       // >
-            token->type = TK_RIGHT_ANGLE;
-        }
-        return token;
-    case '=':
-        if (lex_nextc(ctx, '='))                       // ==
-            token->type = TK_EQUAL_EQUAL;
-        else                                           // =
-            token->type = TK_EQUAL;
-        return token;
-    case '^':
-        if (lex_nextc(ctx, '='))                       // ^=
-            token->type = TK_XOR_EQUAL;
-        else                                           // ^
-            token->type = TK_CARET;
-        return token;
-    case '|':
-        if (lex_nextc(ctx, '|'))                       // ||
-            token->type = TK_LOGIC_OR;
-        else if (lex_nextc(ctx, '='))                  // |=
-            token->type = TK_OR_EQUAL;
-        else                                           // |
-            token->type = TK_VERTICAL_BAR;
-        return token;
-    case ':':
-        if (lex_nextc(ctx, '>'))                       // :>
-            token->type = TK_RIGHT_SQUARE;
-        else                                           // :
-            token->type = TK_COLON;
-        return token;
-    case '#':
-        if (lex_nextc(ctx, '#'))                       // ##
-            token->type = TK_HASH_HASH;
-        else                                           // #
-            token->type = TK_HASH;
-        return token;
+        break;
+    case '0' ... '9':
+        return create_token(TK_PP_NUMBER, flags, pp_num(ctx));
+    case '\'':
+        return create_token(TK_CHAR_CONST, flags, char_const(ctx));
+    case '\"':
+        return create_token(TK_STRING_LIT, flags, string_literal(ctx));
     }
 
-    // Couldn't lex token
-    mcc_err("Unlexable character");
+    if (lex_match1(ctx, EOF)) {
+endfile:
+        return NULL;
+    }
+    if (lex_match1(ctx, '\n')) {
+newline:
+        flags.lwhite    = 0;
+        flags.lnew      = 1;
+        flags.directive = 1;
+        goto retry;
+    }
+    if (lex_match1(ctx, '\f') || lex_match1(ctx, '\r')
+            || lex_match1(ctx, '\t') || lex_match1(ctx, '\v')
+            || lex_match1(ctx, ' ')) {
+whitespace:
+        flags.lwhite = 1;
+        goto retry;
+    }
+    if (lex_match1(ctx, '['))
+        return create_token(TK_LEFT_SQUARE, flags, NULL);
+    if (lex_match1(ctx, ']'))
+        return create_token(TK_RIGHT_SQUARE, flags, NULL);
+    if (lex_match1(ctx, '('))
+        return create_token(TK_LEFT_PAREN, flags, NULL);
+    if (lex_match1(ctx, ')'))
+        return create_token(TK_RIGHT_PAREN, flags, NULL);
+    if (lex_match1(ctx, '{'))
+        return create_token(TK_LEFT_CURLY, flags, NULL);
+    if (lex_match1(ctx, '}'))
+        return create_token(TK_RIGHT_CURLY, flags, NULL);
+    if (lex_match1(ctx, '~'))
+        return create_token(TK_TILDE, flags, NULL);
+    if (lex_match1(ctx, '?'))
+        return create_token(TK_QUEST_MARK, flags, NULL);
+    if (lex_match1(ctx, ';'))
+        return create_token(TK_SEMICOLON, flags, NULL);
+    if (lex_match1(ctx, ','))
+        return create_token(TK_COMMA, flags, NULL);
+    if (lex_match1(ctx, '.')) {
+        if (lex_match2(ctx, '.', '.'))                 // ...
+            return create_token(TK_VARARGS, flags, NULL);
+        else                                           // .
+            return create_token(TK_MEMBER, flags, NULL);
+    }
+    if (lex_match1(ctx, '-')) {
+        if (lex_match1(ctx, '>'))                      // ->
+            return create_token(TK_DEREF_MEMBER, flags, NULL);
+        else if (lex_match1(ctx, '-'))                 // --
+            return create_token(TK_MINUS_MINUS, flags, NULL);
+        else if (lex_match1(ctx, '='))                 // -=
+            return create_token(TK_SUB_EQUAL, flags, NULL);
+        else                                           // -
+            return create_token(TK_MINUS, flags, NULL);
+    }
+    if (lex_match1(ctx, '+')) {
+        if (lex_match1(ctx, '+'))                      // ++
+            return create_token(TK_PLUS_PLUS, flags, NULL);
+        else if (lex_match1(ctx, '='))                 // +=
+            return create_token(TK_ADD_EQUAL, flags, NULL);
+        else                                           // +
+            return create_token(TK_PLUS, flags, NULL);
+    }
+
+    if (lex_match1(ctx, '&')) {
+        if (lex_match1(ctx, '&'))                      // &&
+            return create_token(TK_LOGIC_AND, flags, NULL);
+        else if (lex_match1(ctx, '='))                 // &=
+            return create_token(TK_AND_EQUAL, flags, NULL);
+        else                                           // &
+            return create_token(TK_AMPERSAND, flags, NULL);
+    }
+    if (lex_match1(ctx, '*')) {
+        if (lex_match1(ctx, '='))                      // *=
+            return create_token(TK_MUL_EQUAL, flags, NULL);
+        else                                           // *
+            return create_token(TK_STAR, flags, NULL);
+    }
+    if (lex_match1(ctx, '!')) {
+        if (lex_match1(ctx, '='))                      // !=
+            return create_token(TK_NOT_EQUAL, flags, NULL);
+        else                                           // !
+            return create_token(TK_EXCL_MARK, flags, NULL);
+    }
+    if (lex_match1(ctx, '/')) {
+        if (lex_match1(ctx, '/'))                      // Line comment
+            for (;; lex_fwd(ctx)) {
+                if (lex_match1(ctx, EOF))
+                    goto endfile;
+                if (lex_match1(ctx, '\n'))
+                    goto newline;
+            }
+        if (lex_match1(ctx, '*'))                      // Block comment
+            for (;; lex_fwd(ctx)) {
+                if (lex_match1(ctx, EOF))
+                    goto endfile;
+                if (lex_match2(ctx, '*', '/'))
+                    goto whitespace;
+            }
+        if (lex_match1(ctx, '='))                      // /=
+            return create_token(TK_DIV_EQUAL, flags, NULL);
+        else                                           // /
+            return create_token(TK_FWD_SLASH, flags, NULL);
+    }
+    if (lex_match1(ctx, '%')) {
+        if (lex_match1(ctx, '=')) {                    // %=
+            return create_token(TK_REM_EQUAL, flags, NULL);
+        } else if (lex_match1(ctx, '>')) {             // %>
+            return create_token(TK_RIGHT_CURLY, flags, NULL);
+        } else if (lex_match1(ctx, ':')) {
+            if (lex_match2(ctx, '%', ':'))             // %:%:
+                return create_token(TK_HASH_HASH, flags, NULL);
+            else                                       // %:
+                return create_token(TK_HASH, flags, NULL);
+        } else {                                       // %
+            return create_token(TK_PERCENT, flags, NULL);
+        }
+    }
+    if (lex_match1(ctx, '<')) {
+        if (lex_match1(ctx, '<')) {
+            if (lex_match1(ctx, '='))                  // <<=
+                return create_token(TK_LSHIFT_EQUAL, flags, NULL);
+            else                                       // <<
+                return create_token(TK_LEFT_SHIFT, flags, NULL);
+        } else if (lex_match1(ctx, '=')) {             // <=
+            return create_token(TK_LESS_EQUAL, flags, NULL);
+        } else if (lex_match1(ctx, ':')) {             // <:
+            return create_token(TK_LEFT_SQUARE, flags, NULL);
+        } else if (lex_match1(ctx, '%')) {             // <%
+            return create_token(TK_LEFT_CURLY, flags, NULL);
+        } else {                                       // <
+            return create_token(TK_LEFT_ANGLE, flags, NULL);
+        }
+    }
+    if (lex_match1(ctx, '>')) {
+        if (lex_match1(ctx, '>')) {
+            if (lex_match1(ctx, '='))                  // >>=
+                return create_token(TK_RSHIFT_EQUAL, flags, NULL);
+            else                                       // >>
+                return create_token(TK_RIGHT_SHIFT, flags, NULL);
+        } else if (lex_match1(ctx, '=')) {             // >=
+            return create_token(TK_MORE_EQUAL, flags, NULL);
+        } else {                                       // >
+            return create_token(TK_RIGHT_ANGLE, flags, NULL);
+        }
+    }
+    if (lex_match1(ctx, '=')) {
+        if (lex_match1(ctx, '='))                      // ==
+            return create_token(TK_EQUAL_EQUAL, flags, NULL);
+        else                                           // =
+            return create_token(TK_EQUAL, flags, NULL);
+    }
+    if (lex_match1(ctx, '^')) {
+        if (lex_match1(ctx, '='))                      // ^=
+            return create_token(TK_XOR_EQUAL, flags, NULL);
+        else                                           // ^
+            return create_token(TK_CARET, flags, NULL);
+    }
+    if (lex_match1(ctx, '|')) {
+        if (lex_match1(ctx, '|'))                      // ||
+            return create_token(TK_LOGIC_OR, flags, NULL);
+        else if (lex_match1(ctx, '='))                 // |=
+            return create_token(TK_OR_EQUAL, flags, NULL);
+        else                                           // |
+            return create_token(TK_VERTICAL_BAR, flags, NULL);
+    }
+    if (lex_match1(ctx, ':')) {
+        if (lex_match1(ctx, '>'))                      // :>
+            return create_token(TK_RIGHT_SQUARE, flags, NULL);
+        else                                           // :
+            return create_token(TK_COLON, flags, NULL);
+    }
+    if (lex_match1(ctx, '#')) {
+        if (lex_match1(ctx, '#'))                      // ##
+            return create_token(TK_HASH_HASH, flags, NULL);
+        else                                           // #
+            return create_token(TK_HASH, flags, NULL);
+    }
+
+    return create_token(TK_OTHER, flags, other(ctx));
 }

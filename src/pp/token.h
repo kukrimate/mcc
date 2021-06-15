@@ -7,13 +7,8 @@ typedef enum {
     TK_IDENTIFIER,      // Identifiers
     TK_PP_NUMBER,       // Pre-processing numbers
 
-    TK_CHAR_CONST,      // Character ''
-    TK_WCHAR_CONST,     // Wide character L''
-    TK_STRING_LIT,      // String ""
-    TK_WSTRING_LIT,     // Wide string L""
-
-    TK_HCHAR_LIT,       // System header <>
-    TK_QCHAR_LIT,       // Local header ""
+    TK_CHAR_CONST,      // Character constant
+    TK_STRING_LIT,      // String literal
 
     TK_LEFT_SQUARE,     // [
     TK_RIGHT_SQUARE,    // ]
@@ -64,25 +59,31 @@ typedef enum {
     TK_HASH,            // #
     TK_HASH_HASH,       // ##
 
-    TK_PP_OTHER,        // Any other character
+    TK_OTHER,           // Any other character
 
     TK_PLACEMARKER,     // Placemarker (used when applying the ## opeartor)
 } TokenType;
 
+typedef struct {
+    _Bool lwhite    : 1; // Is there whitespace to the left
+    _Bool lnew      : 1; // Is there newline to the left
+    _Bool directive : 1; // Was this token at the beginning of a line
+    _Bool no_expand : 1; // Token can't expand anymore
+} TokenFlags;
+
+#define TOKEN_NOFLAGS (TokenFlags) { 0 }
+
 // Token type
 typedef struct Token Token;
 struct Token {
-    _Bool lwhite;    // # of whitespace to the left
-    _Bool lnew;      // # of newline to the left
-    _Bool directive; // Was this token at the beginning of a line
-    _Bool no_expand; // Token can't expand anymore
-    TokenType type;  // Type of token
-    char *data;      // String data from the lexer
-    Token *next;     // Next token (if used as a list)
+    TokenType type;   // Type of token
+    TokenFlags flags; // Various token flags (used by the pre-processor)
+    char *data;       // String data from the lexer
+    Token *next;      // Next token (if used as a list)
 };
 
 // Create a new token
-Token *create_token(TokenType type, char *data);
+Token *create_token(TokenType type, TokenFlags flags, char *data);
 
 // Duplicate a token
 Token *dup_token(Token *other);
@@ -104,5 +105,8 @@ Token *stringize(Token *tokens);
 
 // Glue to tokens together to form one
 Token *glue(Token *left, Token *right);
+
+// Concatenate the spelling of a list of tokens
+char *concat_spellings(Token *head);
 
 #endif

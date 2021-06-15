@@ -21,8 +21,8 @@ static void assert_identical(Token *t1, Token *t2)
     assert(t1);
     assert(t2);
     assert(t1->type == t2->type);
-    assert(t1->lnew == t2->lnew);
-    assert(t1->lwhite == t2->lwhite);
+    assert(t1->flags.lnew == t2->flags.lnew);
+    assert(t1->flags.lwhite == t2->flags.lwhite);
 
     if (t1->data == t2->data)
         return;

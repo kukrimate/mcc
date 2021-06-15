@@ -52,7 +52,8 @@ static inline void vec_##alias##_add(Vec_##alias *self, type m)                \
     self->arr[self->n - 1] = m;                                                \
 }                                                                              \
                                                                                \
-static inline void vec_##alias##_addall(Vec_##alias *self, type *m, size_t n)  \
+static inline void vec_##alias##_addall(Vec_##alias *self,                     \
+    const type *m, size_t n)                                                   \
 {                                                                              \
     self->n += n;                                                              \
     if (self->n > self->size)                                                  \

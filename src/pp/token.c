@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * Pre-processor token utility functions
- */
+//
+// Pre-processor token utility functions
+//
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,12 +12,13 @@
 #include "lex.h"
 #include "err.h"
 
-Token *create_token(TokenType type, char *data)
+Token *create_token(TokenType type, TokenFlags flags, char *data)
 {
     Token *token;
 
     token = calloc(1, sizeof *token);
     token->type = type;
+    token->flags = flags;
     token->data = data;
     return token;
 }
@@ -27,11 +28,8 @@ Token *dup_token(Token *other)
     Token *token;
 
     token = calloc(1, sizeof *token);
-    token->lnew = other->lnew;
-    token->lwhite = other->lwhite;
-    token->directive = other->directive;
-    token->no_expand = other->no_expand;
     token->type = other->type;
+    token->flags = other->flags;
     if (other->data)
         token->data = strdup(other->data);
     token->next = NULL;
@@ -130,11 +128,7 @@ static const char *token_spelling(Token *token)
     case TK_IDENTIFIER:
     case TK_PP_NUMBER:
     case TK_CHAR_CONST:
-    case TK_WCHAR_CONST:
     case TK_STRING_LIT:
-    case TK_WSTRING_LIT:
-    case TK_HCHAR_LIT:
-    case TK_QCHAR_LIT:
         return token->data;
     default:
         return punctuator_str[token->type];
@@ -143,9 +137,9 @@ static const char *token_spelling(Token *token)
 
 void output_token(Token *token)
 {
-    if (token->lnew)
+    if (token->flags.lnew)
         putchar('\n');
-    if (token->lwhite)
+    if (token->flags.lwhite)
         putchar(' ');
     fputs(token_spelling(token), stdout);
 }
@@ -160,14 +154,10 @@ Token *stringize(Token *tokens)
     _Bool first = 1;
     for (; tokens; tokens = tokens->next) {
         // Add whitespaces if this is not the first token
-        if (first) {
+        if (first)
             first = 0;
-        } else {
-            if (tokens->lnew)
-                vec_char_add(&buf, '\n');
-            if (tokens->lwhite)
-                vec_char_add(&buf, ' ');
-        }
+        else if (tokens->flags.lnew || tokens->flags.lwhite)
+            vec_char_add(&buf, ' ');
 
         switch (tokens->type) {
         case TK_IDENTIFIER:
@@ -175,11 +165,7 @@ Token *stringize(Token *tokens)
             vec_char_addall(&buf, tokens->data, strlen(tokens->data));
             break;
         case TK_CHAR_CONST:
-        case TK_WCHAR_CONST:
         case TK_STRING_LIT:
-        case TK_WSTRING_LIT:
-        case TK_HCHAR_LIT:
-        case TK_QCHAR_LIT:
             for (const char *s = tokens->data; *s; ++s)
                 switch (*s) {
                 case '\\':
@@ -199,7 +185,7 @@ Token *stringize(Token *tokens)
     }
 
     vec_char_add(&buf, '\"');
-    return create_token(TK_STRING_LIT, vec_char_str(&buf));
+    return create_token(TK_STRING_LIT, TOKEN_NOFLAGS, vec_char_str(&buf));
 }
 
 //
@@ -219,7 +205,7 @@ Token *glue(Token *left, Token *right)
 {
     // Placemarker handling
     if (left->type == TK_PLACEMARKER && right->type == TK_PLACEMARKER)
-        return create_token(TK_PLACEMARKER, NULL);
+        return create_token(TK_PLACEMARKER, TOKEN_NOFLAGS, NULL);
     if (left->type == TK_PLACEMARKER)
         return dup_token(right);
     if (right->type == TK_PLACEMARKER)
@@ -230,11 +216,10 @@ Token *glue(Token *left, Token *right)
                                     token_spelling(right));
     // Lex new buffer
     LexCtx *ctx = lex_open_string(NULL, combined);
-    Token *result = lex_next(ctx, 0);
-    result->lnew = left->lnew;
-    result->lwhite = left->lwhite;
+    Token *result = lex_next(ctx);
+    result->flags = left->flags;
     // If there are more tokens, it means glue failed
-    if (lex_next(ctx, 0))
+    if (lex_next(ctx))
         mcc_err("Token concatenation must result in one token");
     // Free buffers
     lex_free(ctx);
@@ -243,3 +228,13 @@ Token *glue(Token *left, Token *right)
     return result;
 }
 
+char *concat_spellings(Token *head)
+{
+    Vec_char buf;
+    vec_char_init(&buf);
+    for (; head; head = head->next) {
+        const char *spelling = token_spelling(head);
+        vec_char_addall(&buf, spelling, strlen(spelling));
+    }
+    return vec_char_str(&buf);
+}

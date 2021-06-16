@@ -200,7 +200,7 @@ recurse:
     return token;
 }
 
-Token *pp_peek(PpContext *ctx)
+Token *pp_peak(PpContext *ctx)
 {
     Frame *frame;
     Token *token;
@@ -242,7 +242,7 @@ Token *pp_readline(PpContext *ctx)
 {
     Token *token;
 
-    token = pp_peek(ctx);
+    token = pp_peak(ctx);
     if (token && !token->flags.lnew)
         return pp_read(ctx);
     return NULL;
@@ -326,13 +326,13 @@ Cond *pop_cond(PpContext *ctx)
 PpContext *pp_create(void)
 {
     PpContext *ctx = calloc(1, sizeof *ctx);
-    vec_cstr_init(&ctx->search_dirs);
+    dirs_init(&ctx->search_dirs);
     return ctx;
 }
 
 void pp_free(PpContext *ctx)
 {
-    vec_cstr_free(&ctx->search_dirs);
+    dirs_free(&ctx->search_dirs);
     while (ctx->frames) {
         drop_frame(ctx);
     }
@@ -349,7 +349,7 @@ void pp_free(PpContext *ctx)
 
 void pp_add_search_dir(PpContext *ctx, const char *dir)
 {
-    vec_cstr_add(&ctx->search_dirs, dir);
+    dirs_add(&ctx->search_dirs, dir);
 }
 
 int pp_push_file(PpContext *ctx, const char *path)

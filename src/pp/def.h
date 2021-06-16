@@ -78,11 +78,13 @@ struct Cond {
 // Preprocessor context
 //
 
+VEC_GEN(const char *, SearchDirs, dirs)
+
 struct PpContext {
     // Parent context for pre-expansion
     PpContext *parent;
     // Header search directories
-    Vec_cstr search_dirs;
+    SearchDirs search_dirs;
     // Preprocessor frames
     Frame *frames;
     // Defined macros
@@ -115,7 +117,7 @@ void drop_frame(PpContext *ctx);
 // Read the next token
 Token *pp_read(PpContext *ctx);
 // Peek at the next token
-Token *pp_peek(PpContext *ctx);
+Token *pp_peak(PpContext *ctx);
 // Read the next token until a newline
 Token *pp_readline(PpContext *ctx);
 

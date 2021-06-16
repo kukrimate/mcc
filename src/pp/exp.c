@@ -227,7 +227,7 @@ recurse:
     // We need to capture the actuals if the macro is function like
     if (macro->function_like) {
         // If there are no actuals provided, we don't expand
-        lparen = pp_peek(ctx);
+        lparen = pp_peak(ctx);
         if (!lparen || lparen->type != TK_LEFT_PAREN) {
             // Return identifier
             return identifier;
@@ -251,7 +251,7 @@ recurse:
 
 retry:
     // Next token on the stream inherits our spacing
-    if ((last = pp_peek(ctx))) {
+    if ((last = pp_peak(ctx))) {
         last->flags.lnew = identifier->flags.lnew;
         last->flags.lwhite = identifier->flags.lwhite;
     }

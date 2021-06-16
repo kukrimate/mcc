@@ -146,10 +146,10 @@ void output_token(Token *token)
 
 Token *stringize(Token *tokens)
 {
-    Vec_char buf;
+    StringBuilder sb;
 
-    vec_char_init(&buf);
-    vec_char_add(&buf, '\"');
+    sb_init(&sb);
+    sb_add(&sb, '\"');
 
     _Bool first = 1;
     for (; tokens; tokens = tokens->next) {
@@ -157,12 +157,12 @@ Token *stringize(Token *tokens)
         if (first)
             first = 0;
         else if (tokens->flags.lnew || tokens->flags.lwhite)
-            vec_char_add(&buf, ' ');
+            sb_add(&sb, ' ');
 
         switch (tokens->type) {
         case TK_IDENTIFIER:
         case TK_PP_NUMBER:
-            vec_char_addall(&buf, tokens->data, strlen(tokens->data));
+            sb_addstr(&sb, tokens->data);
             break;
         case TK_CHAR_CONST:
         case TK_STRING_LIT:
@@ -170,22 +170,21 @@ Token *stringize(Token *tokens)
                 switch (*s) {
                 case '\\':
                 case '\"':
-                    vec_char_add(&buf, '\\');
+                    sb_add(&sb, '\\');
                     // FALLTHROUGH
                 default:
-                    vec_char_add(&buf, *s);
+                    sb_add(&sb, *s);
                     break;
                 }
             break;
         default:
-            vec_char_addall(&buf, punctuator_str[tokens->type],
-                strlen(punctuator_str[tokens->type]));
+            sb_addstr(&sb, punctuator_str[tokens->type]);
             break;
         }
     }
 
-    vec_char_add(&buf, '\"');
-    return create_token(TK_STRING_LIT, TOKEN_NOFLAGS, vec_char_str(&buf));
+    sb_add(&sb, '\"');
+    return create_token(TK_STRING_LIT, TOKEN_NOFLAGS, sb_str(&sb));
 }
 
 //
@@ -214,14 +213,14 @@ Token *glue(Token *left, Token *right)
     // Combine the spelling of the two tokens (without whitespaces)
     char *combined = strcat_alloc(token_spelling(left),
                                     token_spelling(right));
-    // Lex new buffer
+    // Lex new sbfer
     LexCtx *ctx = lex_open_string("glue_tmp", combined);
     Token *result = lex_next(ctx);
     result->flags = left->flags;
     // If there are more tokens, it means glue failed
     if (lex_next(ctx))
         mcc_err("Token concatenation must result in one token");
-    // Free buffers
+    // Free sbfers
     lex_free(ctx);
     free(combined);
 
@@ -230,11 +229,9 @@ Token *glue(Token *left, Token *right)
 
 char *concat_spellings(Token *head)
 {
-    Vec_char buf;
-    vec_char_init(&buf);
-    for (; head; head = head->next) {
-        const char *spelling = token_spelling(head);
-        vec_char_addall(&buf, spelling, strlen(spelling));
-    }
-    return vec_char_str(&buf);
+    StringBuilder sb;
+    sb_init(&sb);
+    for (; head; head = head->next)
+        sb_addstr(&sb, token_spelling(head));
+    return sb_str(&sb);
 }

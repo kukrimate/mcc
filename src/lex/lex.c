@@ -163,9 +163,8 @@ void lex_free(LexCtx *ctx)
 
 static char *identifier(LexCtx *ctx)
 {
-    Vec_char buf;
-
-    vec_char_init(&buf);
+    StringBuilder sb;
+    sb_init(&sb);
 
     for (;; lex_fwd(ctx))
         switch (ctx->ch1) {
@@ -173,18 +172,17 @@ static char *identifier(LexCtx *ctx)
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            vec_char_add(&buf, ctx->ch1);
+            sb_add(&sb, ctx->ch1);
             break;
         default:
-            return vec_char_str(&buf);
+            return sb_str(&sb);
         }
 }
 
 static char *pp_num(LexCtx *ctx)
 {
-    Vec_char buf;
-
-    vec_char_init(&buf);
+    StringBuilder sb;
+    sb_init(&sb);
 
     for (;; lex_fwd(ctx))
         switch (ctx->ch1) {
@@ -193,7 +191,7 @@ static char *pp_num(LexCtx *ctx)
         case 'a' ... 'z':
         case 'A' ... 'Z':
         case '0' ... '9':
-            vec_char_add(&buf, ctx->ch1);
+            sb_add(&sb, ctx->ch1);
             switch (ctx->ch1) {
             case 'e':
             case 'E':
@@ -202,78 +200,78 @@ static char *pp_num(LexCtx *ctx)
                 switch (ctx->ch2) {
                 case '-':
                 case '+':
-                    vec_char_add(&buf, ctx->ch2);
+                    sb_add(&sb, ctx->ch2);
                     lex_fwd(ctx);
                 }
             }
             break;
         default:
-            return vec_char_str(&buf);
+            return sb_str(&sb);
         }
 }
 
 static char *char_const(LexCtx *ctx)
 {
-    Vec_char buf;
-    vec_char_init(&buf);
+    StringBuilder sb;
+    sb_init(&sb);
 
     if (lex_match1(ctx, 'L'))
-        vec_char_add(&buf, 'L');
+        sb_add(&sb, 'L');
 
-    vec_char_add(&buf, ctx->ch1);
+    sb_add(&sb, ctx->ch1);
     lex_fwd(ctx);
 
     for (;;) {
         if (ctx->ch1 == '\n' || ctx->ch1 == EOF) {
             fprintf(stderr, "Warning: Unterminated character constant\n");
-            return vec_char_str(&buf);
+            return sb_str(&sb);
         }
 
         if (lex_match2(ctx, '\\', '\'')) {
-            vec_char_add(&buf, '\\');
-            vec_char_add(&buf, '\'');
+            sb_add(&sb, '\\');
+            sb_add(&sb, '\'');
             continue;
         }
 
         if (lex_match1(ctx, '\'')) {
-            vec_char_add(&buf, '\'');
-            return vec_char_str(&buf);
+            sb_add(&sb, '\'');
+            return sb_str(&sb);
         }
 
-        vec_char_add(&buf, ctx->ch1);
+        sb_add(&sb, ctx->ch1);
         lex_fwd(ctx);
     }
 }
 
 static char *string_literal(LexCtx *ctx)
 {
-    Vec_char buf;
-    vec_char_init(&buf);
+    StringBuilder sb;
+    sb_init(&sb);
 
     if (lex_match1(ctx, 'L'))
-        vec_char_add(&buf, 'L');
+        sb_add(&sb, 'L');
 
-    vec_char_add(&buf, ctx->ch1);
+    sb_add(&sb, ctx->ch1);
     lex_fwd(ctx);
 
     for (;;) {
         if (ctx->ch1 == '\n' || ctx->ch1 == EOF) {
             fprintf(stderr, "Warning: Unterminated character constant\n");
-            return vec_char_str(&buf);
+            return sb_str(&sb);
         }
 
         if (lex_match2(ctx, '\\', '\"')) {
-            vec_char_add(&buf, '\\');
-            vec_char_add(&buf, '\"');
+            sb_add(&sb, '\\');
+            sb_add(&sb, '\"');
             continue;
         }
 
         if (lex_match1(ctx, '\"')) {
-            vec_char_add(&buf, '\"');
-            return vec_char_str(&buf);
+            sb_add(&sb, '\"');
+            return sb_str(&sb);
         }
 
-        vec_char_add(&buf, ctx->ch1);
+        sb_add(&sb, ctx->ch1);
         lex_fwd(ctx);
     }
 }

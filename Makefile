@@ -12,7 +12,7 @@ MCC_BIN := mcc
 
 # Compiler objects
 MCC_OBJ := src/lex/token.o src/lex/lex.o \
-		   src/pp/cexpr.o src/pp/pp.o \
+		   src/pp/core.o src/pp/eval.o src/pp/dir.o src/pp/exp.o \
 		   src/parse/parse.o src/parse/dump.o src/parse/type.o \
 		   src/mcc.o
 

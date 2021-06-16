@@ -36,6 +36,6 @@ void pp_push_string(PpContext *ctx, const char *path, const char *str);
 //
 // Get the next pre-processed token
 //
-Token *pp_expand(PpContext *ctx);
+Token *pp_next(PpContext *ctx);
 
 #endif

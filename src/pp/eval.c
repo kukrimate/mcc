@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * Simple constant expression evaluator, this builds no AST thus pre-processor
- * constant expressions are evaluated quicker, also this removes the circular
- * depedency between the parser and the pre-processor
- */
+//
+// Pre-processor: constant expression evaluator
+//
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <lex/token.h>
+#include <vec.h>
 #include <err.h>
-#include "cexpr.h"
+#include <lex/token.h>
+#include <lex/lex.h>
+#include "pp.h"
+#include "def.h"
 
 // Convert an integer constant to a long
 static long read_number(Token *pp_num)

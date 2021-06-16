@@ -28,7 +28,7 @@ ParseCtx *parse_create(PpContext *pp)
 
     ctx = calloc(1, sizeof *ctx);
     ctx->pp = pp;
-    ctx->cur = pp_expand(pp);
+    ctx->cur = pp_next(pp);
     return ctx;
 }
 
@@ -47,7 +47,7 @@ static Token *parse_cur(ParseCtx *ctx)
 // Advance to next token
 static void parse_advance(ParseCtx *ctx)
 {
-    ctx->cur = pp_expand(ctx->pp);
+    ctx->cur = pp_next(ctx->pp);
 }
 
 // Like advance but also free

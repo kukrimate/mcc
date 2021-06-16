@@ -9,7 +9,7 @@
 
 #include <assert.h>
 #include <string.h>
-#include <pp/token.h>
+#include <lex/token.h>
 #include <pp/pp.h>
 
 // Assert that tokens will result in identical output
@@ -44,8 +44,8 @@ static void assert_identical_result(const char *str1, const char *str2)
     pp_push_string(ctx2, "test_pp2.c", str2);
 
     for (;;) {
-        t1 = pp_expand(ctx1);
-        t2 = pp_expand(ctx2);
+        t1 = pp_next(ctx1);
+        t2 = pp_next(ctx2);
         assert_identical(t1, t2);
         if (!t1)
             break;
@@ -82,7 +82,6 @@ int main(void)
         "p() i[q()] = { q(1), r(2, 3), r(4,), r(,5), r(,) };\n"
         "char c[2][6] = { str(hello), str() };\n",
         // Expected result
-        "\n"
         "f(2 * (y+1)) + f(2 * (f(2 * (z[0])))) % f(2 * (0)) + t(1);\n"
         "f(2 * (2+(3,4)-0,1)) | f(2 * (~ 5)) & f(2 * (0,1))^m(0,1);\n"
         "int i[] = { 1, 23, 4, 5, };\n"
@@ -99,7 +98,7 @@ int main(void)
         "\n"
         "char p[] = join(x, y);\n",
         // Expected result
-        "\nchar p[] = \"x ## y\";\n"
+        "char p[] = \"x ## y\";\n"
     );
 
     assert_identical_result(
@@ -108,7 +107,6 @@ int main(void)
         "int j[] = { t(1,2,3), t(,4,5), t(6,,7), t(8,9,),\n"
         "            t(10,,), t(,11,), t(,,12), t(,,) };\n",
         // Expected result
-        "\n"
         "int j[] = { 123, 45, 67, 89,\n"
         "            10, 11, 12, };\n"
     );
@@ -124,7 +122,6 @@ int main(void)
         "showlist(The first, second, and third items.);\n"
         "report(x>y, \"x is %d but y is %d\", x, y);\n",
         // Expected result
-        "\n"
         "fprintf(stderr, \"Flag\");\n"
         "fprintf(stderr, \"X = %d\\n\", x);\n"
         "puts(\"The first, second, and third items.\");\n"
@@ -142,7 +139,6 @@ int main(void)
         "#define Z X\n"
         "X\n",
         // Expected result
-        "\n"
         "(1 + 5 + 2)\n"
         "((1 + 1) + 2 + 3)\n"
         "\n"

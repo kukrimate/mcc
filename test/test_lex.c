@@ -9,8 +9,8 @@
 
 #include <assert.h>
 #include <string.h>
-#include <pp/token.h>
-#include <pp/lex.h>
+#include <lex/token.h>
+#include <lex/lex.h>
 
 static void assert_next_type(LexCtx *ctx, TokenType type)
 {

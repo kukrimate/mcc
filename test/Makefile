@@ -11,11 +11,12 @@ LIBDIR := ../src
 CFLAGS := -I$(LIBDIR) -std=c99 -D_GNU_SOURCE -Wall -Wextra -O1 -g
 
 # Lexer test objects
-TEST_LEX_OBJ := $(LIBDIR)/pp/token.o $(LIBDIR)/pp/lex.o test_lex.o
+TEST_LEX_OBJ := $(LIBDIR)/lex/token.o $(LIBDIR)/lex/lex.o test_lex.o
 
 # Preprocessor test objects
-TEST_PP_OBJ  := $(LIBDIR)/pp/token.o $(LIBDIR)/pp/lex.o $(LIBDIR)/pp/cexpr.o \
-				$(LIBDIR)/pp/pp.o test_pp.o
+TEST_PP_OBJ  := $(LIBDIR)/lex/token.o $(LIBDIR)/lex/lex.o \
+				$(LIBDIR)/pp/core.o $(LIBDIR)/pp/eval.o  $(LIBDIR)/pp/dir.o \
+				$(LIBDIR)/pp/exp.o test_pp.o
 
 .PHONY: all
 all: test_lex test_pp

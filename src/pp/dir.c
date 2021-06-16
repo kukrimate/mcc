@@ -31,66 +31,56 @@ static ssize_t find_formal(Macro *macro, Token *token)
 
 static void capture_formals(PpContext *ctx, Macro *macro)
 {
-    Token **tail, *tmp;
+    Token **tail = &macro->formals, *token;
 
-    // First token must be an lparen
-    tmp = pp_readline(ctx);
-    if (!tmp || tmp->type != TK_LEFT_PAREN)
-        pp_err(ctx, "Formal parameters must start with (");
-
-    // Initialize token list
-    tail = &macro->formals;
     macro->param_cnt = 0;
     macro->has_varargs = 0;
 
-want_ident:
-    // Free previous token
-    free_token(tmp);
-
+want_identifier:
     // Read formal parameter name
-    tmp = pp_readline(ctx);
-    if (!tmp)
+    token = pp_readline(ctx);
+    if (!token)
         pp_err(ctx, "Unexpected end of formal parameters");
-    if (tmp->type == TK_RIGHT_PAREN)
+    if (token->type == TK_RIGHT_PAREN)
         goto end;
     // Variable argument mode
-    if (tmp->type == TK_VARARGS) {
-        free_token(tmp);
-        tmp = create_token(TK_IDENTIFIER, TOKEN_NOFLAGS, strdup("__VA_ARGS__"));
+    if (token->type == TK_VARARGS) {
+        free_token(token);
+        token = create_token(TK_IDENTIFIER, TOKEN_NOFLAGS, strdup("__VA_ARGS__"));
         macro->has_varargs = 1;
     }
     // Must be an identifier
-    if (tmp->type != TK_IDENTIFIER)
+    if (token->type != TK_IDENTIFIER)
         pp_err(ctx, "Invalid token in formal parameter list");
 
     // Make sure it's not duplicate
-    if (find_formal(macro, tmp) >= 0)
+    if (find_formal(macro, token) >= 0)
         pp_err(ctx, "Duplicate formal parameter name");
 
     // Add name to the list
-    *tail = tmp;
+    *tail = token;
     tail = &(*tail)->next;
     ++macro->param_cnt;
 
     // Next token must be a , or )
-    tmp = pp_readline(ctx);
-    if (!tmp)
+    token = pp_readline(ctx);
+    if (!token)
         pp_err(ctx, "Unexpected end of formal parameters");
-    if (tmp->type == TK_COMMA) {
+    if (token->type == TK_COMMA) {
         if (macro->has_varargs)
             pp_err(ctx, "Variable args must be the last formal parameter of macro");
-        goto want_ident;
+        free_token(token);
+        goto want_identifier;
     }
-    if (tmp->type != TK_RIGHT_PAREN)
+    if (token->type != TK_RIGHT_PAREN)
         pp_err(ctx, "Invalid token in formal parameter list");
 end:
-    free_token(tmp);
+    free_token(token);
 }
 
-static void capture_replace_list(PpContext *ctx, Macro *macro)
+static void capture_replace_list(Token *token, PpContext *ctx, Macro *macro)
 {
     Replace *prev, **tail;
-    Token   *tmp;
     ssize_t formal_idx;
     _Bool   do_glue;
 
@@ -98,8 +88,8 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
     tail = &macro->replace_list;
     do_glue = 0;
 
-    while ((tmp = pp_readline(ctx))) {
-        switch (tmp->type) {
+    for (; token; token = pp_readline(ctx)) {
+        switch (token->type) {
         case TK_HASH_HASH:
             // Must be preceeded by something
             if (!macro->replace_list)
@@ -115,22 +105,22 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
             // Add a glue operator to the list
             prev = *tail = calloc(1, sizeof **tail);
             (*tail)->type = R_GLUE;
-            (*tail)->token = tmp;
+            (*tail)->token = token;
             tail = &(*tail)->next;
             break;
         case TK_HASH:
             if (macro->function_like) {
                 // Free hash
-                free_token(tmp);
+                free_token(token);
                 // Get formal parameter name
-                tmp = pp_readline(ctx);
-                if (!tmp || (formal_idx = find_formal(macro, tmp)) < 0) {
+                token = pp_readline(ctx);
+                if (!token || (formal_idx = find_formal(macro, token)) < 0) {
                     pp_err(ctx, "# operator must be followed by formal parameter name");
                 }
 
                 prev = *tail = calloc(1, sizeof **tail);
                 (*tail)->type = R_PARAM_STR;
-                (*tail)->token = tmp;
+                (*tail)->token = token;
                 (*tail)->param_idx = formal_idx;
                 tail = &(*tail)->next;
                 do_glue = 0;
@@ -140,12 +130,12 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
         default:
             // Append token or parameter index to replacement list
             prev = *tail = calloc(1, sizeof **tail);
-            if (!macro->function_like || (formal_idx = find_formal(macro, tmp)) < 0) {
+            if (!macro->function_like || (formal_idx = find_formal(macro, token)) < 0) {
                 (*tail)->type = R_TOKEN;
-                (*tail)->token = tmp;
+                (*tail)->token = token;
             } else {
                 (*tail)->type  = do_glue ? R_PARAM_GLU : R_PARAM_EXP;
-                (*tail)->token = tmp;
+                (*tail)->token = token;
                 (*tail)->param_idx = formal_idx;
             }
             tail = &(*tail)->next;
@@ -160,33 +150,37 @@ static void capture_replace_list(PpContext *ctx, Macro *macro)
 
 static void dir_define(PpContext *ctx)
 {
-    Token *tmp;
+    Token *token;
     Macro *macro;
 
     // Macro name must be an identifier
-    tmp = pp_readline(ctx);
-    if (!tmp || tmp->type != TK_IDENTIFIER)
+    token = pp_readline(ctx);
+    if (!token || token->type != TK_IDENTIFIER)
         pp_err(ctx, "Macro name must be an identifier");
 
     // Put macro name into database and get pointer to struct
     macro = new_macro(ctx);
-    macro->name = tmp;
+    macro->name = token;
     macro->enabled = 1;
 
     // Check for macro type
-    tmp = pp_peek(ctx);
-    if (tmp && tmp->type == TK_LEFT_PAREN
-            && !tmp->flags.lnew && !tmp->flags.lwhite) {
+    token = pp_readline(ctx);
+    if (token && token->type == TK_LEFT_PAREN
+            && !token->flags.lnew && !token->flags.lwhite) {
+        // Free left parenthesis
+        free_token(token);
         // Function like macro
         macro->function_like = 1;
         capture_formals(ctx, macro);
+        // Capture replacement list
+        capture_replace_list(pp_readline(ctx), ctx, macro);
     } else {
         // Object-like macro
         macro->function_like = 0;
+        // Capture replacement list
+        capture_replace_list(token, ctx, macro);
     }
 
-    // Capture replacement list
-    capture_replace_list(ctx, macro);
 }
 
 static void dir_undef(PpContext *ctx)

@@ -7,10 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <lib/vec.h>
+#include <vec.h>
+#include <err.h>
 #include "token.h"
 #include "lex.h"
-#include "err.h"
 
 Token *create_token(TokenType type, TokenFlags flags, char *data)
 {
@@ -215,7 +215,7 @@ Token *glue(Token *left, Token *right)
     char *combined = strcat_alloc(token_spelling(left),
                                     token_spelling(right));
     // Lex new buffer
-    LexCtx *ctx = lex_open_string(NULL, combined);
+    LexCtx *ctx = lex_open_string("glue_tmp", combined);
     Token *result = lex_next(ctx);
     result->flags = left->flags;
     // If there are more tokens, it means glue failed

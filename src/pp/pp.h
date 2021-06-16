@@ -31,7 +31,7 @@ int pp_push_file(PpContext *ctx, const char *path);
 //
 // Push a string to the pre-processor stack
 //
-void pp_push_string(PpContext *ctx, const char *filename, const char *string);
+void pp_push_string(PpContext *ctx, const char *path, const char *str);
 
 //
 // Get the next pre-processed token

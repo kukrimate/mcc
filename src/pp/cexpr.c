@@ -9,8 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "err.h"
-#include "token.h"
+#include <lex/token.h>
+#include <err.h>
 #include "cexpr.h"
 
 // Convert an integer constant to a long
@@ -284,6 +284,8 @@ long p_unary(Token **tail)
             mcc_err("Missing )");
         return value;
     }
+    if ((token = next_tk(tail, TK_IDENTIFIER)))
+        return 0;
     if ((token = next_tk(tail, TK_PP_NUMBER)))
         return read_number(token);
     if ((token = next_tk(tail, TK_CHAR_CONST)))

@@ -11,8 +11,9 @@ CFLAGS := -Isrc -std=c99 -D_GNU_SOURCE -Wall -Wextra -g -O1
 MCC_BIN := mcc
 
 # Compiler objects
-MCC_OBJ := src/pp/token.o src/pp/lex.o src/pp/cexpr.o \
-		   src/pp/pp.o src/parse/parse.o src/parse/dump.o src/parse/type.o \
+MCC_OBJ := src/lex/token.o src/lex/lex.o \
+		   src/pp/cexpr.o src/pp/pp.o \
+		   src/parse/parse.o src/parse/dump.o src/parse/type.o \
 		   src/mcc.o
 
 .PHONY: all

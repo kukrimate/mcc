@@ -6,7 +6,7 @@
 
 #include <assert.h>
 #include <stdio.h>
-#include <lib/vec.h>
+#include <vec.h>
 #include "token.h"
 #include "lex.h"
 
@@ -17,7 +17,7 @@ typedef enum {
 
 struct LexCtx {
     // Path to the current file
-    const char *path;
+    char *path;
     // Line number in the current file
     size_t line;
     // Is this the first token read from the context?
@@ -32,16 +32,24 @@ struct LexCtx {
 
     // Buffered characters
     int ch1, ch2;
+    // Ugly hack: Equivalent new line count for each character
+    // For accurate line number tracking across line splices
+    int ch1_lines, ch2_lines;
 };
 
 //
 // Read the next character
 //
-static int lex_readc(LexCtx *ctx)
+static int lex_readc(LexCtx *ctx, int *lines)
 {
+    *lines = 0;
     if (ctx->type == LEX_STR) {
-        if (ctx->str[0] == '\\' && ctx->str[1] == '\n')
+        if (ctx->str[0] == '\\' && ctx->str[1] == '\n') {
             ctx->str += 2;
+            *lines += 1;
+        }
+        if (*ctx->str == '\n')
+            *lines += 1;
         if (*ctx->str)
             return *ctx->str++;
         return EOF;
@@ -49,10 +57,15 @@ static int lex_readc(LexCtx *ctx)
         int ch1 = fgetc(ctx->fp);
         if (ch1 == '\\') {
             int ch2 = fgetc(ctx->fp);
-            if (ch2 == '\n')
-                return fgetc(ctx->fp);
-            ungetc(ch2, ctx->fp);
+            if (ch2 == '\n') {
+                ch1 = fgetc(ctx->fp);
+                *lines += 1;
+            } else {
+                ungetc(ch2, ctx->fp);
+            }
         }
+        if (ch1 == '\n')
+            *lines += 1;
         return ch1;
     }
 }
@@ -62,8 +75,13 @@ static int lex_readc(LexCtx *ctx)
 //
 static void lex_fwd(LexCtx *ctx)
 {
+    // Skip over the newlines covered by ch1
+    ctx->line += ctx->ch1_lines;
+    // Overwrite ch1 with ch2
     ctx->ch1 = ctx->ch2;
-    ctx->ch2 = lex_readc(ctx);
+    ctx->ch1_lines = ctx->ch2_lines;
+    // Read next character into ch2
+    ctx->ch2 = lex_readc(ctx, &ctx->ch2_lines);
 }
 
 //
@@ -98,30 +116,30 @@ LexCtx *lex_open_file(const char *path)
         return NULL;
 
     LexCtx *ctx = calloc(1, sizeof *ctx);
-    ctx->path = path;
+    ctx->path = strdup(path);
     ctx->line = 1;
     ctx->first = 1;
 
     ctx->type = LEX_FILE;
     ctx->fp = fp;
 
-    ctx->ch1 = lex_readc(ctx);
-    ctx->ch2 = lex_readc(ctx);
+    ctx->ch1 = lex_readc(ctx, &ctx->ch1_lines);
+    ctx->ch2 = lex_readc(ctx, &ctx->ch2_lines);
     return ctx;
 }
 
 LexCtx *lex_open_string(const char *path, const char *str)
 {
     LexCtx *ctx = calloc(1, sizeof *ctx);
-    ctx->path = path;
+    ctx->path = strdup(path);
     ctx->line = 1;
     ctx->first = 1;
 
     ctx->type = LEX_STR;
     ctx->str = str;
 
-    ctx->ch1 = lex_readc(ctx);
-    ctx->ch2 = lex_readc(ctx);
+    ctx->ch1 = lex_readc(ctx, &ctx->ch1_lines);
+    ctx->ch2 = lex_readc(ctx, &ctx->ch2_lines);
     return ctx;
 }
 
@@ -139,6 +157,7 @@ void lex_free(LexCtx *ctx)
 {
     if (ctx->type == LEX_FILE)
         fclose(ctx->fp);
+    free(ctx->path);
     free(ctx);
 }
 

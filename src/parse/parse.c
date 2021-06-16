@@ -7,12 +7,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "err.h"
-#include "target.h"
-#include "pp/token.h"
-#include "pp/pp.h"
+#include <lex/token.h>
+#include <pp/pp.h>
+#include <target.h>
+#include <err.h>
 #include "type.h"
-#include "target.h"
 #include "parse.h"
 
 struct ParseCtx {

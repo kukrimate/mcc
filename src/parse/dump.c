@@ -5,9 +5,9 @@
  */
 
 #include <stdio.h>
-#include <pp/token.h>
+#include <lex/token.h>
 #include <pp/pp.h>
-#include "target.h"
+#include <target.h>
 #include "parse.h"
 
 #define AST_INDENT 2

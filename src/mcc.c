@@ -3,10 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <getopt.h>
-#include "pp/token.h"
-#include "pp/pp.h"
-#include "target.h"
-#include "parse/parse.h"
+#include <lex/token.h>
+#include <pp/pp.h>
+#include <target.h>
+#include <parse/parse.h>
 
 static void do_preprocess(PpContext *pp)
 {

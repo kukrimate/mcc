@@ -8,9 +8,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <limits.h>
-#include <lib/vec.h>
-#include "token.h"
-#include "lex.h"
+#include <vec.h>
+#include <lex/token.h>
+#include <lex/lex.h>
 #include "cexpr.h"
 #include "pp.h"
 
@@ -105,7 +105,7 @@ static void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ..
     }
 
     fflush(stdout);
-    fprintf(stderr, "\nError in: %s:%ld: ", lex_path(file_frame->lex),
+    fprintf(stderr, "\nError: %s:%ld: ", lex_path(file_frame->lex),
         lex_line(file_frame->lex));
     va_list ap;
     va_start(ap, err);
@@ -128,8 +128,13 @@ static void drop_frame(PpContext *ctx)
     Frame *tmp;
 
     tmp = ctx->frames;
-    if (tmp->type == F_LEXER)
+    if (tmp->type == F_LEXER) {
+        if (tmp->prev)
+            free_token(tmp->prev);
         lex_free(tmp->lex);
+    } else {
+        free_tokens(tmp->tokens);
+    }
     ctx->frames = ctx->frames->next;
     free(tmp);
 }
@@ -179,6 +184,10 @@ recurse:
             token = lex_next(frame->lex);
             if (!token) {
                 // Remove frame
+                if (frame->next == NULL) {
+                    // Don't drop bottom lexer frame
+                    return NULL;
+                }
                 drop_frame(ctx);
                 goto recurse;
             }
@@ -297,17 +306,6 @@ static void free_macro(Macro *macro)
     free(macro);
 }
 
-static void free_macros(Macro *head)
-{
-    Macro *tmp;
-
-    while (head) {
-        tmp = head->next;
-        free_macro(head);
-        head = tmp;
-    }
-}
-
 static void del_macro(PpContext *ctx, Token *token)
 {
     Macro **macro, *tmp;
@@ -355,7 +353,7 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
     if (!macro->param_cnt) {
         tmp = pp_read(ctx);
         if (!tmp || tmp->type != TK_RIGHT_PAREN)
-            pp_err(ctx, "Non-empty argument list for 0 parameter macro");
+            pp_err(ctx, "Non-empty actual parameters for 0 parameter macro");
         free_token(tmp);
         return;
     }
@@ -370,7 +368,7 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
     for (;;) {
         tmp = pp_read(ctx);
         if (!tmp)
-            pp_err(ctx, "Unexpected end of parameters");
+            pp_err(ctx, "Unexpected end of actual parameters");
 
         switch (tmp->type) {
         case TK_COMMA:
@@ -382,7 +380,7 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
             free_token(tmp);
             // Move to next actual parameter
             if (actual_cnt >= macro->param_cnt)
-                pp_err(ctx, "Too many parameters for function-like macro");
+                pp_err(ctx, "Too many actual parameters");
             tmps = &actuals[actual_cnt++];
             break;
         case TK_LEFT_PAREN:
@@ -403,13 +401,11 @@ static void capture_actuals(PpContext *ctx, Macro *macro, Token **actuals)
         }
     }
     endloop:
-
-    // Free right paren
+    // Free right parenthesis
     free_token(tmp);
 
-    // Make sure we got the correct number of actuals
-    if (macro->param_cnt != actual_cnt)
-        pp_err(ctx, "Too few parameters for function-like macro");
+    if (actual_cnt < macro->param_cnt)
+        pp_err(ctx, "Too few actual parameters");
 }
 
 
@@ -921,14 +917,8 @@ static _Bool is_cexpr(PpContext *ctx)
 
     head = NULL;
     tail = &head;
-    while ((*tail = pp_expand(&subctx))) {
-        // Replace un-replaced identifiers with 0
-        if ((*tail)->type == TK_IDENTIFIER) {
-            free_token(*tail);
-            *tail = create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("0"));
-        }
+    while ((*tail = pp_expand(&subctx)))
         tail = &(*tail)->next;
-    }
 
     // Finally evaluate the expression
     result = eval_cexpr(head);
@@ -1087,7 +1077,7 @@ static char *read_hchar(PpContext *ctx)
     for (Token **tail = &head;; tail = &(*tail)->next) {
         *tail = pp_readline(ctx);
         if (*tail == NULL)
-            pp_err(ctx, "System header name must end with >");
+            return NULL;
         if ((*tail)->type == TK_RIGHT_ANGLE) {
             free_token(*tail);
             *tail = NULL;
@@ -1095,12 +1085,16 @@ static char *read_hchar(PpContext *ctx)
         }
     }
     char *hchar_str = concat_spellings(head);
-    while (head) {
-        Token *tmp = head->next;
-        free_token(head);
-        head = tmp;
-    }
+    free_tokens(head);
     return hchar_str;
+}
+
+static char *read_qchar(Token *token)
+{
+    size_t len = strlen(token->data);
+    if (len < 2 || token->data[0] != '\"' || token->data[len - 1] != '\"')
+        return NULL;
+    return strndup(token->data + 1, len - 2);
 }
 
 // #include directive
@@ -1108,7 +1102,7 @@ static void dir_include(PpContext *ctx)
 {
     Token *token = pp_readline(ctx);
     if (!token)
-        pp_err(ctx, "Missing header name from #include");
+        goto err_invalid;
 
     char *name;
     LexCtx *lex;
@@ -1116,25 +1110,29 @@ static void dir_include(PpContext *ctx)
     switch (token->type) {
     case TK_LEFT_ANGLE:
         name = read_hchar(ctx);
+        if (name == NULL)
+            goto err_invalid;
         lex = open_system_header(ctx, name);
+        free(name);
         break;
     case TK_STRING_LIT:
-        if (*token->data == 'L')
-            pp_err(ctx, "Wide string literal can't be used as a header name");
-        name = strndup(token->data + 1, strlen(token->data) - 2);
+        name = read_qchar(token);
+        if (name == NULL)
+            goto err_invalid;
         lex = open_local_header(ctx, name);
+        free(name);
         break;
     default:
-        // TODO: support re-checking header name after macro expansion
-        pp_err(ctx, "Invalid header name");
+        goto err_invalid;
     }
     free_token(token);
-
     if (!lex)
         pp_err(ctx, "Can't locate header file: %s", name);
-
     pp_push_lex_frame(ctx, lex);
-    // TODO: make lexer free header name string
+    return;
+
+err_invalid:
+    pp_err(ctx, "Invalid header name");
 }
 
 void handle_directive(PpContext *ctx)
@@ -1186,7 +1184,17 @@ PpContext *pp_create(void)
 void pp_free(PpContext *ctx)
 {
     vec_cstr_free(&ctx->search_dirs);
-    free_macros(ctx->macros);
+    while (ctx->frames) {
+        drop_frame(ctx);
+    }
+    for (Macro *m = ctx->macros; m; ) {
+        Macro *next = m->next;
+        free_macro(m);
+        m = next;
+    }
+    while (ctx->conds) {
+        free(pop_cond(ctx));
+    }
     free(ctx);
 }
 
@@ -1200,12 +1208,11 @@ int pp_push_file(PpContext *ctx, const char *path)
     LexCtx *lex = lex_open_file(path);
     if (!lex)
         return -1;
-
     pp_push_lex_frame(ctx, lex);
     return 0;
 }
 
-void pp_push_string(PpContext *ctx, const char *filename, const char *string)
+void pp_push_string(PpContext *ctx, const char *path, const char *str)
 {
-    pp_push_lex_frame(ctx, lex_open_string(filename, string));
+    pp_push_lex_frame(ctx, lex_open_string(path, str));
 }

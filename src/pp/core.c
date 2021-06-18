@@ -15,38 +15,44 @@
 
 static void handle_date(PpContext *ctx)
 {
-    pp_push_list_frame(ctx, NULL,
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
         create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("Mar  7 2021")));
 }
 
 static void handle_time(PpContext *ctx)
 {
-    pp_push_list_frame(ctx, NULL,
-        create_token(TK_STRING_LIT, TOKEN_NOFLAGS, strdup("15:30:07")));
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("15:30:07")));
 }
 
 static void handle_file(PpContext *ctx)
 {
-    pp_push_list_frame(ctx, NULL,
-        create_token(TK_STRING_LIT, TOKEN_NOFLAGS, strdup("unknown")));
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("unknown")));
 }
 
 static void handle_line(PpContext *ctx)
 {
-    pp_push_list_frame(ctx, NULL,
-        create_token(TK_STRING_LIT, TOKEN_NOFLAGS, strdup("1")));
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
 }
 
 static void handle_one(PpContext *ctx)
 {
-    pp_push_list_frame(ctx, NULL,
-     create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
 }
 
 static void handle_vers(PpContext *ctx)
 {
-    pp_push_list_frame(ctx, NULL,
-     create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("199901L")));
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("199901L")));
 }
 
 //
@@ -116,22 +122,6 @@ static Frame *new_frame(PpContext *ctx)
     return frame;
 }
 
-void drop_frame(PpContext *ctx)
-{
-    Frame *tmp;
-
-    tmp = ctx->frames;
-    if (tmp->type == F_LEXER) {
-        if (tmp->prev)
-            free_token(tmp->prev);
-        lex_free(tmp->lex);
-    } else {
-        free_tokens(tmp->tokens);
-    }
-    ctx->frames = ctx->frames->next;
-    free(tmp);
-}
-
 void pp_push_lex_frame(PpContext *ctx, LexCtx *lex)
 {
     Frame *frame = new_frame(ctx);
@@ -139,15 +129,35 @@ void pp_push_lex_frame(PpContext *ctx, LexCtx *lex)
     frame->lex = lex;
 }
 
-void pp_push_list_frame(PpContext *ctx, Macro *source, Token *tokens)
+TokenList *pp_push_list_frame(PpContext *ctx, Macro *source)
 {
-    if (source)
-        source->enabled = 0;
-
     Frame *frame = new_frame(ctx);
     frame->type = F_LIST;
     frame->source = source;
-    frame->tokens = tokens;
+    frame->i = 0;
+
+    token_list_init(&frame->list);
+    return &frame->list;
+}
+
+static void drop_frame(PpContext *ctx)
+{
+    Frame *frame = ctx->frames;
+    if (frame->type == F_LEXER) {
+        // Free lexer context
+        lex_free(frame->lex);
+    } else {
+        // Re-enable macro when popping list frame
+        if (frame->source)
+            frame->source->enabled = 1;
+        // Free any remaining tokens
+        for (; frame->i < frame->list.n; ++frame->i)
+            free_token(frame->list.arr[frame->i]);
+        // Free list
+        token_list_free(&frame->list);
+    }
+    ctx->frames = ctx->frames->next;
+    free(frame);
 }
 
 Token *pp_read(PpContext *ctx)
@@ -157,95 +167,29 @@ Token *pp_read(PpContext *ctx)
 
 recurse:
     frame = ctx->frames;
-    if (!frame)
+    if (frame == NULL)
         return NULL;
 
     switch (frame->type) {
     case F_LEXER:
-        if (frame->prev) {
-            // Return saved token
-            token = frame->prev;
-            frame->prev = NULL;
-        } else {
-            // Read token directly from lexer
-            token = lex_next(frame->lex);
-            if (!token) {
-                // Remove frame
-                if (frame->next == NULL) {
-                    // Don't drop bottom lexer frame
-                    return NULL;
-                }
-                drop_frame(ctx);
-                goto recurse;
-            }
-        }
-        break;
-    case F_LIST:
-        // Get token from the token list
-        if (!frame->tokens) {
-            // Re-enable source macro when popping frame
-            if (frame->source)
-                frame->source->enabled = 1;
-            // Remove frame
+        token = lex_next(frame->lex);
+        // Drop frame if file has hit its end, and it isn't the bottom frame
+        if (token == NULL && frame->next != NULL) {
             drop_frame(ctx);
             goto recurse;
         }
-        // Advance token list
-        token = frame->tokens;
-        frame->tokens = frame->tokens->next;
-        token->next = NULL;
-        break;
-    }
-
-    return token;
-}
-
-Token *pp_peak(PpContext *ctx)
-{
-    Frame *frame;
-    Token *token;
-
-    frame = ctx->frames;
-recurse:
-    if (!frame)
-        return NULL;
-
-    switch (frame->type) {
-    case F_LEXER:
-        if (frame->prev) {
-            // Return saved token
-            token = frame->prev;
-        } else {
-            // Fill frame->prev if it doesn't exist
-            token = frame->prev = lex_next(frame->lex);
-            if (!token) {
-                // Peek at next frame
-                frame = frame->next;
-                goto recurse;
-            }
-        }
         break;
     case F_LIST:
-        token = frame->tokens;
-        if (!token) {
-            // Peek at next frame
-            frame = frame->next;
+        // Drop frame if list reached its end
+        if (frame->i >= frame->list.n) {
+            drop_frame(ctx);
             goto recurse;
         }
+        // Get token from the token list
+        token = frame->list.arr[frame->i++];
         break;
     }
-
     return token;
-}
-
-Token *pp_readline(PpContext *ctx)
-{
-    Token *token;
-
-    token = pp_peak(ctx);
-    if (token && !token->flags.lnew)
-        return pp_read(ctx);
-    return NULL;
 }
 
 Macro *new_macro(PpContext *ctx)
@@ -286,7 +230,7 @@ void free_macro(Macro *macro)
 
     // Free formal parameters for function like macro
     if (macro->function_like)
-        free_tokens(macro->formals);
+        token_list_freeall(&macro->formals);
 
     free(macro);
 }

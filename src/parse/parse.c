@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vec.h>
 #include <lex/token.h>
 #include <pp/pp.h>
 #include <target.h>

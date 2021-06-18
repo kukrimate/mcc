@@ -20,8 +20,8 @@ struct LexCtx {
     char *path;
     // Line number in the current file
     size_t line;
-    // Is this the first token read from the context?
-    _Bool first;
+    // Mark the next token as a directive
+    _Bool directive;
 
     // Type of data being lexed
     LexType type;
@@ -118,7 +118,7 @@ LexCtx *lex_open_file(const char *path)
     LexCtx *ctx = calloc(1, sizeof *ctx);
     ctx->path = strdup(path);
     ctx->line = 1;
-    ctx->first = 1;
+    ctx->directive = 1;
 
     ctx->type = LEX_FILE;
     ctx->fp = fp;
@@ -133,7 +133,7 @@ LexCtx *lex_open_string(const char *path, const char *str)
     LexCtx *ctx = calloc(1, sizeof *ctx);
     ctx->path = strdup(path);
     ctx->line = 1;
-    ctx->first = 1;
+    ctx->directive = 1;
 
     ctx->type = LEX_STR;
     ctx->str = str;
@@ -287,8 +287,8 @@ Token *lex_next(LexCtx *ctx)
 {
     TokenFlags flags = TOKEN_NOFLAGS;
 
-    if (ctx->first) {
-        ctx->first = 0;
+    if (ctx->directive) {
+        ctx->directive = 0;
         flags.directive = 1;
     }
 
@@ -324,10 +324,8 @@ endfile:
     }
     if (lex_match1(ctx, '\n')) {
 newline:
-        flags.lwhite    = 0;
-        flags.lnew      = 1;
-        flags.directive = 1;
-        goto retry;
+        ctx->directive = 1;
+        return create_token(TK_NEW_LINE, flags, NULL);
     }
     if (lex_match1(ctx, '\f') || lex_match1(ctx, '\r')
             || lex_match1(ctx, '\t') || lex_match1(ctx, '\v')

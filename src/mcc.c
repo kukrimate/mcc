@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <getopt.h>
+#include <vec.h>
 #include <lex/token.h>
 #include <pp/pp.h>
 #include <target.h>
@@ -16,8 +17,6 @@ static void do_preprocess(PpContext *pp)
         output_token(tmp);
         free_token(tmp);
     }
-    // Output a newline after the last token
-    putchar('\n');
 }
 
 static void do_compile(PpContext *pp)

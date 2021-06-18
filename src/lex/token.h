@@ -3,7 +3,10 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 
+// Pre-processor token types
 typedef enum {
+    TK_NEW_LINE,        // New line
+
     TK_IDENTIFIER,      // Identifiers
     TK_PP_NUMBER,       // Pre-processing numbers
 
@@ -60,53 +63,51 @@ typedef enum {
     TK_HASH_HASH,       // ##
 
     TK_OTHER,           // Any other character
-
-    TK_PLACEMARKER,     // Placemarker (used when applying the ## opeartor)
 } TokenType;
 
+// Pre-processor token flags
 typedef struct {
     _Bool lwhite    : 1; // Is there whitespace to the left
-    _Bool lnew      : 1; // Is there newline to the left
     _Bool directive : 1; // Was this token at the beginning of a line
     _Bool no_expand : 1; // Token can't expand anymore
 } TokenFlags;
 
 #define TOKEN_NOFLAGS (TokenFlags) { 0 }
 
-// Token type
-typedef struct Token Token;
-struct Token {
+// Pre-processor token
+typedef struct {
+    int refcnt;    // Reference count
     TokenType type;   // Type of token
     TokenFlags flags; // Various token flags (used by the pre-processor)
     char *data;       // String data from the lexer
-    Token *next;      // Next token (if used as a list)
-};
+} Token;
 
 // Create a new token
 Token *create_token(TokenType type, TokenFlags flags, char *data);
-
-// Duplicate a token
-Token *dup_token(Token *other);
-
-// Duplicate a token list
-Token *dup_tokens(Token *head);
-
+// Create a new reference to a token
+Token *ref_token(Token *token);
 // Free a token
 void free_token(Token *token);
-
-// Free a token list
-void free_tokens(Token *head);
 
 // Output a token to the screen
 void output_token(Token *token);
 
-// Convert a list of tokens to a string token
-Token *stringize(Token *tokens);
+// List of pre-processor tokens
+VEC_GEN(Token *, TokenList, token_list)
+// Free a list of tokens (both the tokens in it and the list itself)
+void token_list_freeall(TokenList *list);
+// Extend the contents of a token list from another one, referencing all tokens
+void token_list_refxtend(TokenList *list, TokenList *other);
 
+// Concat the spellings of a list of tokens into a string
+// Used for re-constructing the header name from a list of tokens making up
+// a system header name (e.g. <stdio.h>)
+char *concat_spellings(TokenList *tokens);
+
+// Concat the spellings of a list of tokens into to a new string literal token
+Token *stringize_operator(TokenList *tokens);
 // Glue to tokens together to form one
-Token *glue(Token *left, Token *right);
+Token *glue_operator(Token *left, Token *right);
 
-// Concatenate the spelling of a list of tokens
-char *concat_spellings(Token *head);
 
 #endif

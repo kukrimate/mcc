@@ -17,60 +17,30 @@ Token *create_token(TokenType type, TokenFlags flags, char *data)
     Token *token;
 
     token = calloc(1, sizeof *token);
+    token->refcnt = 1;
     token->type = type;
     token->flags = flags;
     token->data = data;
     return token;
 }
 
-Token *dup_token(Token *other)
+Token *ref_token(Token *token)
 {
-    Token *token;
-
-    token = calloc(1, sizeof *token);
-    token->type = other->type;
-    token->flags = other->flags;
-    if (other->data)
-        token->data = strdup(other->data);
-    token->next = NULL;
+    ++token->refcnt;
     return token;
-}
-
-Token *dup_tokens(Token *head)
-{
-    Token *result, **tail;
-
-    result = NULL;
-    tail = &result;
-
-    for (; head; head = head->next) {
-        *tail = dup_token(head);
-        tail = &(*tail)->next;
-    }
-
-    return result;
 }
 
 void free_token(Token *token)
 {
-    if (token->data)
-        free(token->data);
-    free(token);
-}
-
-void free_tokens(Token *head)
-{
-    Token *tmp;
-
-    while (head) {
-        tmp = head->next;
-        free_token(head);
-        head = tmp;
+    if (!--token->refcnt) {
+        if (token->data)
+            free(token->data);
+        free(token);
     }
 }
 
-// Punctuator to string conversion table
-static char *punctuator_str[] = {
+static char *token_str[] = {
+    [TK_NEW_LINE     ] = "\n",
     [TK_LEFT_SQUARE  ] = "[",
     [TK_RIGHT_SQUARE ] = "]",
     [TK_LEFT_PAREN   ] = "(",
@@ -119,7 +89,6 @@ static char *punctuator_str[] = {
     [TK_COMMA        ] = ",",
     [TK_HASH         ] = "#",
     [TK_HASH_HASH    ] = "##",
-    [TK_PLACEMARKER  ] = "$", // This should never be printed
 };
 
 static const char *token_spelling(Token *token)
@@ -129,44 +98,66 @@ static const char *token_spelling(Token *token)
     case TK_PP_NUMBER:
     case TK_CHAR_CONST:
     case TK_STRING_LIT:
+    case TK_OTHER:
         return token->data;
     default:
-        return punctuator_str[token->type];
+        return token_str[token->type];
     }
 }
 
 void output_token(Token *token)
 {
-    if (token->flags.lnew)
-        putchar('\n');
-    if (token->flags.lwhite)
+    /*if (token->flags.lwhite)*/
         putchar(' ');
     fputs(token_spelling(token), stdout);
 }
 
-Token *stringize(Token *tokens)
+void token_list_freeall(TokenList *list)
+{
+    for (size_t i = 0; i < list->n; ++i)
+        free_token(list->arr[i]);
+    token_list_free(list);
+}
+
+void token_list_refxtend(TokenList *list, TokenList *other)
+{
+    for (size_t i = 0; i < other->n; ++i)
+        token_list_add(list, ref_token(other->arr[i]));
+}
+
+char *concat_spellings(TokenList *tokens)
+{
+    StringBuilder sb;
+    sb_init(&sb);
+    for (size_t i = 0; i < tokens->n; ++i)
+        sb_addstr(&sb, token_spelling(tokens->arr[i]));
+    return sb_str(&sb);
+}
+
+Token *stringize_operator(TokenList *tokens)
 {
     StringBuilder sb;
 
     sb_init(&sb);
     sb_add(&sb, '\"');
 
-    _Bool first = 1;
-    for (; tokens; tokens = tokens->next) {
-        // Add whitespaces if this is not the first token
-        if (first)
-            first = 0;
-        else if (tokens->flags.lnew || tokens->flags.lwhite)
+    for (size_t i = 0; i < tokens->n; ++i) {
+        Token *token = tokens->arr[i];
+
+        // Ignore whitespace before the first token, otherwise add single space
+        // if lwhite was set by the lexer (per ISO/IEC 9899:1999 6.10.3.2)
+        if (i > 0 && token->flags.lwhite)
             sb_add(&sb, ' ');
 
-        switch (tokens->type) {
+        switch (token->type) {
         case TK_IDENTIFIER:
         case TK_PP_NUMBER:
-            sb_addstr(&sb, tokens->data);
+        case TK_OTHER:
+            sb_addstr(&sb, token->data);
             break;
         case TK_CHAR_CONST:
         case TK_STRING_LIT:
-            for (const char *s = tokens->data; *s; ++s)
+            for (const char *s = token->data; *s; ++s)
                 switch (*s) {
                 case '\\':
                 case '\"':
@@ -178,7 +169,7 @@ Token *stringize(Token *tokens)
                 }
             break;
         default:
-            sb_addstr(&sb, punctuator_str[tokens->type]);
+            sb_addstr(&sb, token_str[token->type]);
             break;
         }
     }
@@ -187,51 +178,28 @@ Token *stringize(Token *tokens)
     return create_token(TK_STRING_LIT, TOKEN_NOFLAGS, sb_str(&sb));
 }
 
-//
-// Concatenate two strings into a newly-allocated string
-//
-static char *strcat_alloc(const char *s1, const char *s2)
+Token *glue_operator(Token *left, Token *right)
 {
-    size_t l1 = strlen(s1), l2 = strlen(s2);
-    char *result = malloc(l1 + l2 + 1);
-    memcpy(result, s1, l1);
-    memcpy(result + l1, s2, l2);
-    result[l1 + l2] = 0;
-    return result;
-}
-
-Token *glue(Token *left, Token *right)
-{
-    // Placemarker handling
-    if (left->type == TK_PLACEMARKER && right->type == TK_PLACEMARKER)
-        return create_token(TK_PLACEMARKER, TOKEN_NOFLAGS, NULL);
-    if (left->type == TK_PLACEMARKER)
-        return dup_token(right);
-    if (right->type == TK_PLACEMARKER)
-        return dup_token(left);
-
     // Combine the spelling of the two tokens (without whitespaces)
-    char *combined = strcat_alloc(token_spelling(left),
-                                    token_spelling(right));
-    // Lex new sbfer
+    StringBuilder sb;
+    sb_init(&sb);
+    sb_addstr(&sb, token_spelling(left));
+    sb_addstr(&sb, token_spelling(right));
+    char *combined = sb_str(&sb);
+
+    // Fee old tokens
+    free_token(left);
+    free_token(right);
+
+    // Re-lex new combined token
     LexCtx *ctx = lex_open_string("glue_tmp", combined);
     Token *result = lex_next(ctx);
-    result->flags = left->flags;
     // If there are more tokens, it means glue failed
     if (lex_next(ctx))
         mcc_err("Token concatenation must result in one token");
-    // Free sbfers
+    // Free buffers
     lex_free(ctx);
     free(combined);
 
     return result;
-}
-
-char *concat_spellings(Token *head)
-{
-    StringBuilder sb;
-    sb_init(&sb);
-    for (; head; head = head->next)
-        sb_addstr(&sb, token_spelling(head));
-    return sb_str(&sb);
 }

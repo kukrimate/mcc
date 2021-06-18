@@ -8,17 +8,17 @@
 #define PP_DEF_H
 
 typedef enum {
-    R_GLUE,      // Glue operator
     R_TOKEN,     // Replace with a token
     R_PARAM_EXP, // Replace with a parameter expanded
     R_PARAM_STR, // Replace with a parameter stringified
-    R_PARAM_GLU, // Replace with a parameter without expansion (or placemarker)
+    R_PARAM_GLU, // Replace with a parameter as is
 } ReplaceType;
 
 typedef struct Replace Replace;
 struct Replace {
     ReplaceType type;      // Replace type
     Token*      token;     // Original token
+    _Bool       glue_next; // Entry was on the LHS of a glue operator
     ssize_t     param_idx; // Parameter index (for R_PARAM_*) or -1
     Replace     *next;
 };
@@ -31,16 +31,15 @@ struct Macro {
     Replace   *replace_list; // Replacement list
 
     // Function-like macro-only
-    size_t    param_cnt;     // Number of parameters
     _Bool     has_varargs;   // Does this macro have varargs parameter?
-    Token     *formals;      // Formal parameters
+    TokenList formals;       // Formal parameters
 
     Macro     *next;
 };
 
 typedef enum {
-    F_LEXER,  // Directly from the lexer
-    F_LIST,   // List of tokens in memory
+    F_LEXER,   // Directly from the lexer
+    F_LIST,    // List of tokens (stored in the frame)
 } FrameType;
 
 typedef struct Frame Frame;
@@ -48,14 +47,12 @@ struct Frame {
     FrameType type;
     union {
         // F_LEXER
-        struct {
-            LexCtx *lex;    // Lexer context
-            Token  *prev;   // For peeking
-        };
+        LexCtx *lex;    // Lexer context
         // F_LIST
         struct {
-            Macro *source; // Originating macro
-            Token *tokens; // Head of token list
+            Macro *source;  // Originating macro
+            size_t i;       // Current index into the list
+            TokenList list;
         };
     };
     Frame *next;
@@ -110,27 +107,24 @@ Predef *find_predef(Token *identifier);
 // Print an error message then exit
 void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ...);
 
+// Pre-processor stack manipulation
 void pp_push_lex_frame(PpContext *ctx, LexCtx *lex);
-void pp_push_list_frame(PpContext *ctx, Macro *source, Token *tokens);
-void drop_frame(PpContext *ctx);
-
+TokenList *pp_push_list_frame(PpContext *ctx, Macro *source);
 // Read the next token
 Token *pp_read(PpContext *ctx);
-// Peek at the next token
-Token *pp_peak(PpContext *ctx);
-// Read the next token until a newline
-Token *pp_readline(PpContext *ctx);
 
+// Macro database manipulation
 Macro *new_macro(PpContext *ctx);
 Macro *find_macro(PpContext *ctx, Token *token);
 void free_macro(Macro *macro);
 void del_macro(PpContext *ctx, Token *token);
 
+// Conditional stack manipulation
 Cond *new_cond(PpContext *ctx, CondType type);
 Cond *pop_cond(PpContext *ctx);
 
 // Evaluate a constant expression from a stored token sequence
-long eval_cexpr(Token *head);
+long eval_cexpr(TokenList *list);
 
 // Handle a pre-processor directive
 void handle_directive(PpContext *ctx);

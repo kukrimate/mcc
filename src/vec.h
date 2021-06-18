@@ -53,7 +53,7 @@ static inline void fn_pre##_add(stru_name *self, type m)                       \
 }                                                                              \
                                                                                \
 static inline void fn_pre##_addall(stru_name *self,                            \
-    const type *m, size_t n)                                                   \
+    type const *m, size_t n)                                                   \
 {                                                                              \
     self->n += n;                                                              \
     if (self->n > self->size)                                                  \
@@ -76,6 +76,11 @@ static inline type *fn_pre##_push(stru_name *self)                             \
 static inline type *fn_pre##_top(stru_name *self)                              \
 {                                                                              \
     return self->arr + self->n - 1;                                            \
+}                                                                              \
+                                                                               \
+static inline void fn_pre##_extend(stru_name *self, stru_name *other)          \
+{                                                                              \
+    fn_pre##_addall(self, other->arr, other->n);                               \
 }
 
 //

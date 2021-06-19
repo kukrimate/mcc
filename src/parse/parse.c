@@ -22,6 +22,7 @@ struct ParseCtx {
     Token *cur;
 };
 
+
 // Create a parser context, reading tokens from the pre-processor
 ParseCtx *parse_create(PpContext *pp)
 {
@@ -59,6 +60,11 @@ static void parse_eat(ParseCtx *ctx)
     token = parse_cur(ctx);
     parse_advance(ctx);
     free_token(token);
+}
+
+static void parse_err(ParseCtx *ctx, const char *msg)
+{
+    pp_err(ctx->pp, msg);
 }
 
 // Match token and than eat if matched
@@ -142,11 +148,11 @@ static Node *convert_int_const(Token *pp_num)
     return create_const(value);
 
 // err:
-//     mcc_err("Invalid character in integer constant");
+//     parse_err(ctx, "Invalid character in integer constant");
 }
 
 // Convert a character constant to an integer constant node
-static Node *convert_char_const(Token *char_const)
+static Node *convert_char_const(ParseCtx *ctx, Token *char_const)
 {
     char   *cur;
     t_umax value;
@@ -155,7 +161,7 @@ static Node *convert_char_const(Token *char_const)
     // Check for empty char constant
     cur = char_const->data;
     if (!*cur)
-        mcc_err("Empty character constant");
+        parse_err(ctx, "Empty character constant");
 
     // Convert to integer
     value = 0;
@@ -230,14 +236,14 @@ Node *p_primary(ParseCtx *ctx)
         parse_eat(ctx);
         break;
     case TK_CHAR_CONST:
-        node = convert_char_const(token);
+        node = convert_char_const(ctx, token);
         parse_eat(ctx);
         break;
     case TK_LEFT_PAREN:
         parse_eat(ctx);
         node = p_expression(ctx);
         if (!parse_match(ctx, TK_RIGHT_PAREN)) {
-            mcc_err("Missing )");
+            parse_err(ctx, "Missing )");
         }
         break;
     default:
@@ -247,7 +253,7 @@ Node *p_primary(ParseCtx *ctx)
     return node;
 
 err:
-    mcc_err("Invalid primary expression");
+    parse_err(ctx, "Invalid primary expression");
 }
 
 Node *p_postfix(ParseCtx *ctx)
@@ -382,7 +388,7 @@ Node *p_cond(ParseCtx *ctx)
     n2 = p_expression(ctx);
 
     if (!parse_match(ctx, TK_COLON))
-        mcc_err("Missing : from trinary conditional");
+        parse_err(ctx, "Missing : from trinary conditional");
 
     return create_trinary(ND_COND, n1, n2, p_cond(ctx));
 }

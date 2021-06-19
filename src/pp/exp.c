@@ -129,6 +129,8 @@ static void expand_macro(PpContext *ctx, Macro *macro, TokenList actuals[], Toke
                 if (expand_replace(ctx, replace, actuals, expansion)) {
                     // Replace the first right token token with the glue result
                     expansion->arr[result_idx] = glue_operator(left, expansion->arr[result_idx]);
+                    if (expansion->arr[result_idx] == NULL)
+                        pp_err(ctx, "Token concatenation resulted in more than one token");
                 } else {
                     // No right tokens -> glue result is the last left token
                     token_list_add(expansion, left);

@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vec.h>
-#include <err.h>
 #include "token.h"
 #include "lex.h"
 
@@ -192,13 +191,13 @@ Token *glue_operator(Token *left, Token *right)
     free_token(right);
 
     // Re-lex new combined token
-    LexCtx *ctx = lex_open_string("glue_tmp", combined);
-    Token *result = lex_next(ctx);
+    LexCtx *lex = lex_open_string("glue_tmp", combined);
+    Token *result = lex_next(lex);
     // If there are more tokens, it means glue failed
-    if (lex_next(ctx))
-        mcc_err("Token concatenation must result in one token");
+    if (lex_next(lex))
+        return NULL;
     // Free buffers
-    lex_free(ctx);
+    lex_free(lex);
     free(combined);
 
     return result;

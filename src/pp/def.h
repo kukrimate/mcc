@@ -100,10 +100,6 @@ typedef struct {
 
 Predef *find_predef(Token *identifier);
 
-
-// Print an error message then exit
-void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ...);
-
 // Pre-processor stack manipulation
 void pp_push_lex_frame(PpContext *ctx, LexCtx *lex);
 TokenList *pp_push_list_frame(PpContext *ctx, Macro *source);
@@ -117,7 +113,7 @@ void free_macro(Macro *macro);
 void del_macro(PpContext *ctx, Token *token);
 
 // Evaluate a constant expression from a stored token sequence
-long eval_cexpr(TokenList *list);
+long eval_cexpr(PpContext *ctx, TokenList *list);
 
 // Handle a pre-processor directive
 void handle_directive(PpContext *ctx);

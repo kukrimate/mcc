@@ -15,7 +15,7 @@
 #include "def.h"
 
 // Convert an integer constant to a long
-static long read_number(Token *pp_num)
+static long read_number(PpContext *ctx, Token *pp_num)
 {
     // List of allowed integer constant suffixes
     static char *allowed_suffixes[] = {
@@ -82,7 +82,7 @@ check_suf:
             return value;
 
     // Suffix was incorrect
-    mcc_err("Invalid integer constant");
+    pp_err(ctx, "Invalid integer constant");
 }
 
 static int octal(int ch, char **str)
@@ -126,7 +126,7 @@ endloop:
     return ch;
 }
 
-static int escseq(char **str)
+static int escseq(PpContext *ctx, char **str)
 {
     int ch = *(*str)++;
     switch (ch) {
@@ -154,12 +154,12 @@ static int escseq(char **str)
     case 'x':
         return hexadecimal(ch, str);
     default:
-        mcc_err("Invalid escape sequence");
+        pp_err(ctx, "Invalid escape sequence");
     }
 }
 
 // Convert a character constant to a long
-static long read_char(Token *char_const)
+static long read_char(PpContext *ctx, Token *char_const)
 {
     char *str;
     long val;
@@ -181,7 +181,7 @@ static long read_char(Token *char_const)
             break;
         case '\\':
             ++str;
-            val = val << 8 | escseq(&str);
+            val = val << 8 | escseq(ctx, &str);
             break;
         case '\'':
             return val;
@@ -189,7 +189,7 @@ static long read_char(Token *char_const)
             goto err;
         }
 err:
-    mcc_err("Invalid character constant");
+    pp_err(ctx, "Invalid character constant");
 }
 
 // Iterator for a TokenList
@@ -274,40 +274,40 @@ static long eval_bop(TokenType op, long lhs, long rhs)
 }
 
 // Hybrid recursive descent and operator presedence parser
-static long p_unary(TokenIterator *it);
-static long p_binary(TokenIterator *it, long lhs, int min_precedence);
-static long p_cond(TokenIterator *it);
+static long p_unary(PpContext *ctx, TokenIterator *it);
+static long p_binary(PpContext *ctx, TokenIterator *it, long lhs, int min_precedence);
+static long p_cond(PpContext *ctx, TokenIterator *it);
 
-long p_unary(TokenIterator *it)
+long p_unary(PpContext *ctx, TokenIterator *it)
 {
     long value;
     Token *token;
 
     if (next_tk(it, TK_LEFT_PAREN)) {
-        value = p_cond(it);
+        value = p_cond(ctx, it);
         if (!next_tk(it, TK_RIGHT_PAREN))
-            mcc_err("Missing )");
+            pp_err(ctx, "Missing )");
         return value;
     }
     if ((token = next_tk(it, TK_IDENTIFIER)))
         return 0;
     if ((token = next_tk(it, TK_PP_NUMBER)))
-        return read_number(token);
+        return read_number(ctx, token);
     if ((token = next_tk(it, TK_CHAR_CONST)))
-        return read_char(token);
+        return read_char(ctx, token);
     if (next_tk(it, TK_PLUS))
-        return p_unary(it);
+        return p_unary(ctx, it);
     if (next_tk(it, TK_MINUS))
-        return -p_unary(it);
+        return -p_unary(ctx, it);
     if (next_tk(it, TK_TILDE))
-        return ~p_unary(it);
+        return ~p_unary(ctx, it);
     if (next_tk(it, TK_EXCL_MARK))
-        return !p_unary(it);
+        return !p_unary(ctx, it);
 
-    mcc_err("Invalid unary expression");
+    pp_err(ctx, "Invalid unary expression");
 }
 
-long p_binary(TokenIterator *it, long lhs, int min_precedence)
+long p_binary(PpContext *ctx, TokenIterator *it, long lhs, int min_precedence)
 {
     // Precedence table
     static int precedences[] = {
@@ -342,45 +342,45 @@ long p_binary(TokenIterator *it, long lhs, int min_precedence)
         // Move to next token
         TOKEN_IT_NEXT(it);
         // Read RHS
-        rhs = p_unary(it);
+        rhs = p_unary(ctx, it);
         // Recurse on operators with greater precedence
         for (;;) {
             op_next = peek_bop(it);
             if (op_next < 0 || precedences[op_next] <= precedences[op])
                 break;
-            rhs = p_binary(it, rhs, precedences[op_next]);
+            rhs = p_binary(ctx, it, rhs, precedences[op_next]);
         }
         // Evaluate current operand
         lhs = eval_bop(op, lhs, rhs);
     }
 }
 
-long p_cond(TokenIterator *it)
+long p_cond(PpContext *ctx, TokenIterator *it)
 {
     long l, m, r;
 
     // Left side
-    l = p_binary(it, p_unary(it), 0);
+    l = p_binary(ctx, it, p_unary(ctx, it), 0);
     // Look for ? for conditional
     if (!next_tk(it, TK_QUEST_MARK))
         return l;
     // Middle
-    m = p_cond(it);
+    m = p_cond(ctx, it);
     // Error on missing :
     if (!next_tk(it, TK_COLON))
-        mcc_err("Missing : from trinary conditional");
+        pp_err(ctx, "Missing : from trinary conditional");
     // Right
-    r = p_cond(it);
+    r = p_cond(ctx, it);
 
     // Evaluate
     return l ? m : r;
 }
 
-long eval_cexpr(TokenList *list)
+long eval_cexpr(PpContext *ctx, TokenList *list)
 {
     TokenIterator it = TOKEN_IT_NEW(list);
-    long value = p_cond(&it);
+    long value = p_cond(ctx, &it);
     if (TOKEN_IT_HASCUR(&it)) // Make sure there are no tokens left
-        mcc_err("Invalid constant expression");
+        pp_err(ctx, "Invalid constant expression");
     return value;
 }

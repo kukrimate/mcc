@@ -19,6 +19,11 @@ PpContext *pp_create(void);
 void pp_free(PpContext *ctx);
 
 //
+// Print an error message then exit
+//
+void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ...);
+
+//
 // Add a search directory to the pre-processor
 //
 void pp_add_search_dir(PpContext *ctx, const char *dir);

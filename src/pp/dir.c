@@ -292,7 +292,7 @@ static _Bool eval_if(PpContext *ctx)
         token_list_add(&cexpr, token);
 
     // Finally evaluate the constant expression
-    _Bool result = eval_cexpr(&cexpr);
+    _Bool result = eval_cexpr(ctx, &cexpr);
     token_list_freeall(&cexpr);
     return result;
 }

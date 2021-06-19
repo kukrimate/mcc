@@ -195,11 +195,7 @@ Token *pp_next(PpContext *ctx)
 
     for (Token *token;; free_token(token)) {
         token = pp_read(ctx);
-        if (token == NULL)
-            return NULL;
-
-        switch (token->type) {
-        case TK_IDENTIFIER:
+        if (token && token->type == TK_IDENTIFIER) {
             // Always expand pre-defined macro
             if ((predef = find_predef(token))) {
                 predef->handle(ctx);
@@ -216,16 +212,7 @@ Token *pp_next(PpContext *ctx)
                     token->flags.no_expand = 1;
                 }
             }
-            return token;
-        case TK_HASH:
-            // Handle pre-processing directive if appropriate
-            if (token->flags.directive) {
-                handle_directive(ctx);
-                continue;
-            }
-            return token;
-        default:
-            return token;
         }
+        return token;
     }
 }

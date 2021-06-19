@@ -4,6 +4,7 @@
 // Pre-processor: directive handling
 //
 
+#include <assert.h>
 #include <stdio.h>
 #include <limits.h>
 #include <vec.h>
@@ -12,11 +13,32 @@
 #include "pp.h"
 #include "def.h"
 
+// Read from the current pre-processor frame's underlying lexer context
+static Token *dir_read(PpContext *ctx)
+{
+    assert(ctx->frames && ctx->frames->type == F_LEXER);
+    return lex_next(ctx->frames->lex);
+}
+
+static void push_cond(PpContext *ctx, Cond cond)
+{
+    assert(ctx->frames && ctx->frames->type == F_LEXER);
+    cond_list_add(&ctx->frames->conds, cond);
+}
+
+static int pop_cond(PpContext *ctx)
+{
+    assert(ctx->frames && ctx->frames->type == F_LEXER);
+    if (ctx->frames->conds.n > 0)
+        return cond_list_pop(&ctx->frames->conds);
+    return -1;
+}
+
 // Make sure there are no stray tokens left before the terminating newline of
 // a pre-processing directive
 static void dir_expect_newline(PpContext *ctx)
 {
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (token) {
         if (token->type != TK_NEW_LINE)
             pp_err(ctx, "Missing newline after pre-processing directive");
@@ -38,7 +60,7 @@ static ssize_t find_formal(Macro *macro, Token *token)
 
 static Token *capture_formals_read(PpContext *ctx)
 {
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (!token)
         pp_err(ctx, "Unexpected end of formal parameters");
     if (token->type == TK_NEW_LINE)
@@ -105,7 +127,7 @@ static void capture_replace_list(Token *token, PpContext *ctx, Macro *macro)
     _Bool need_glue_rhs = 0;
     ssize_t formal_idx;
 
-    for (;; token = pp_read(ctx)) {
+    for (;; token = dir_read(ctx)) {
         if (!token)
             pp_err(ctx, "Replacement list must be terminated by a newline");
         switch (token->type) {
@@ -127,7 +149,7 @@ static void capture_replace_list(Token *token, PpContext *ctx, Macro *macro)
                 // Free # token
                 free_token(token);
                 // Get formal parameter name
-                token = pp_read(ctx);
+                token = dir_read(ctx);
                 if (!token || (formal_idx = find_formal(macro, token)) < 0)
                     pp_err(ctx, "# operator must be followed by formal parameter name");
                 // Stringized parameter will be added to the expansion
@@ -166,7 +188,7 @@ static void capture_replace_list(Token *token, PpContext *ctx, Macro *macro)
 static void dir_define(PpContext *ctx)
 {
     // Macro name must be an identifier
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (!token || token->type != TK_IDENTIFIER)
         pp_err(ctx, "Macro name must be an identifier");
 
@@ -176,7 +198,7 @@ static void dir_define(PpContext *ctx)
     macro->enabled = 1;
 
     // Check for macro type
-    token = pp_read(ctx);
+    token = dir_read(ctx);
     if (token && token->type == TK_LEFT_PAREN && !token->flags.lwhite) {
         // Free left parenthesis
         free_token(token);
@@ -184,7 +206,7 @@ static void dir_define(PpContext *ctx)
         macro->function_like = 1;
         capture_formals(ctx, macro);
         // Capture replacement list
-        capture_replace_list(pp_read(ctx), ctx, macro);
+        capture_replace_list(dir_read(ctx), ctx, macro);
     } else {
         // Object-like macro
         macro->function_like = 0;
@@ -198,7 +220,7 @@ static void dir_define(PpContext *ctx)
 static void dir_undef(PpContext *ctx)
 {
     // Macro name must be an identifier
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (!token || token->type != TK_IDENTIFIER)
         pp_err(ctx, "Macro name must be an identifier");
 
@@ -212,16 +234,16 @@ static void dir_undef(PpContext *ctx)
 
 static Token *defined_operator(PpContext *ctx)
 {
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (!token)
         goto err;
 
     // Handle the form: defined ( IDENTIFIER )
     if (token->type == TK_LEFT_PAREN) {
         free_token(token);
-        if (!(token = pp_read(ctx)))
+        if (!(token = dir_read(ctx)))
             goto err;
-        Token *rparen = pp_read(ctx);
+        Token *rparen = dir_read(ctx);
         if (!rparen || rparen->type != TK_RIGHT_PAREN)
             goto err;
         free_token(rparen);
@@ -249,7 +271,7 @@ static _Bool eval_if(PpContext *ctx)
 
     // Capture constant expression, evaluating the defined operator
     for (;;) {
-        Token *token = pp_read(ctx);
+        Token *token = dir_read(ctx);
         if (!token)
             pp_err(ctx, "#if missing terminating newline");
         if (token->type == TK_NEW_LINE) {
@@ -278,7 +300,7 @@ static _Bool eval_if(PpContext *ctx)
 static _Bool eval_ifdef(PpContext *ctx)
 {
     // Macro name must be an identifier
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (!token || token->type != TK_IDENTIFIER)
         pp_err(ctx, "#if(n)def must be followed by a macro name");
 
@@ -293,10 +315,10 @@ static _Bool eval_ifdef(PpContext *ctx)
 }
 
 // Find the end or alternative branch of non-evaluated conditional
-static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
+static Cond skip_cond(PpContext *ctx, _Bool want_else_elif)
 {
     for (size_t nest = 1; nest; ) {
-        Token *token = pp_read(ctx);
+        Token *token = dir_read(ctx);
         if (!token)
             pp_err(ctx, "Unterminated conditional inclusion");
 
@@ -305,7 +327,7 @@ static CondType skip_cond(PpContext *ctx, _Bool want_else_elif)
             free_token(token);
 
             // Read directive name, skipping empty or invalid directives
-            token = pp_read(ctx);
+            token = dir_read(ctx);
             if (!token || token->type != TK_IDENTIFIER)
                 continue;
 
@@ -343,7 +365,7 @@ static void dir_if(PpContext *ctx, _Bool condition)
 {
     // Evaluate #if/#ifdef/#ifndef if condition is true
     if (condition) {
-        new_cond(ctx, C_IF);
+        push_cond(ctx, C_IF);
         // NOTE: eval_if or eval_ifdef already consumed the newline
         return;
     }
@@ -355,12 +377,12 @@ static void dir_if(PpContext *ctx, _Bool condition)
             abort();
         case C_ELIF:        // #elif: evaluate only if condition is true
             if (eval_if(ctx)) {
-                new_cond(ctx, C_ELIF);
+                push_cond(ctx, C_ELIF);
                 return;
             }
             break;
         case C_ELSE:        // #else: always evaluate
-            new_cond(ctx, C_ELSE);
+            push_cond(ctx, C_ELSE);
             dir_expect_newline(ctx);
             return;
         case C_ENDIF:       // #endif: nothing to evaluate
@@ -373,14 +395,11 @@ static void dir_if(PpContext *ctx, _Bool condition)
 static void dir_else(PpContext *ctx)
 {
     // #else or #elif must come after an #if or #elif
-    Cond *prev = pop_cond(ctx);
-    if (!prev || !(prev->type == C_IF || prev->type == C_ELIF))
+    int prev = pop_cond(ctx);
+    if (prev != C_IF && prev != C_ELIF)
         pp_err(ctx, "Unexpected #else or #elif");
-    free(prev);
-
     // #else or #elif of an evaluated #if just skips till #endif
     skip_cond(ctx, 0);
-
     // Must end with a newline
     dir_expect_newline(ctx);
 }
@@ -388,11 +407,8 @@ static void dir_else(PpContext *ctx)
 static void dir_endif(PpContext *ctx)
 {
     // #endif must be preceded by some other conditional
-    Cond *prev = pop_cond(ctx);
-    if (!prev)
+    if (pop_cond(ctx) < 0)
         pp_err(ctx, "Unexpected #endif");
-    free(prev);
-
     // Must end with a newline
     dir_expect_newline(ctx);
 }
@@ -427,7 +443,7 @@ static char *read_hchar(PpContext *ctx)
     token_list_init(&list);
 
     for (;;) {
-        Token *token = pp_read(ctx);
+        Token *token = dir_read(ctx);
         if (!token) {
             token_list_freeall(&list);
             return NULL;
@@ -454,7 +470,7 @@ static char *read_qchar(Token *token)
 // #include directive
 static void dir_include(PpContext *ctx)
 {
-    Token *token = pp_read(ctx);
+    Token *token = dir_read(ctx);
     if (!token)
         goto err_invalid;
 
@@ -494,7 +510,7 @@ void handle_directive(PpContext *ctx)
 {
     Token *token;
 
-    token = pp_read(ctx);
+    token = dir_read(ctx);
     // Directives must not end before a newline
     if (!token)
         pp_err(ctx, "Expected newline at the end of empty directive");

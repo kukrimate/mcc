@@ -127,6 +127,7 @@ void pp_push_lex_frame(PpContext *ctx, LexCtx *lex)
     Frame *frame = new_frame(ctx);
     frame->type = F_LEXER;
     frame->lex = lex;
+    cond_list_init(&frame->conds);
 }
 
 TokenList *pp_push_list_frame(PpContext *ctx, Macro *source)
@@ -144,8 +145,12 @@ static void drop_frame(PpContext *ctx)
 {
     Frame *frame = ctx->frames;
     if (frame->type == F_LEXER) {
+        if (frame->conds.n)
+            pp_err(ctx, "Unterminated conditional inclusion");
         // Free lexer context
         lex_free(frame->lex);
+        // Free conditional inclusion stack
+        cond_list_free(&frame->conds);
     } else {
         // Re-enable macro when popping list frame
         if (frame->source)
@@ -163,7 +168,7 @@ static void drop_frame(PpContext *ctx)
 Token *pp_read(PpContext *ctx)
 {
     Frame *frame;
-    Token *token;
+    Token *token = NULL;
 
 recurse:
     frame = ctx->frames;
@@ -176,6 +181,12 @@ recurse:
         // Drop frame if file has hit its end, and it isn't the bottom frame
         if (token == NULL && frame->next != NULL) {
             drop_frame(ctx);
+            goto recurse;
+        }
+        // Handle pre-processing directives when reading from the lexer
+        if (token && token->type == TK_HASH && token->flags.directive) {
+            free_token(token);
+            handle_directive(ctx);
             goto recurse;
         }
         break;
@@ -250,23 +261,6 @@ void del_macro(PpContext *ctx, Token *token)
     }
 }
 
-Cond *new_cond(PpContext *ctx, CondType type)
-{
-    Cond *cond = calloc(1, sizeof *cond);
-    cond->type = type;
-    cond->next = ctx->conds;
-    ctx->conds = cond;
-    return cond;
-}
-
-Cond *pop_cond(PpContext *ctx)
-{
-    Cond *cond = ctx->conds;
-    if (cond)
-        ctx->conds = cond->next;
-    return cond;
-}
-
 PpContext *pp_create(void)
 {
     PpContext *ctx = calloc(1, sizeof *ctx);
@@ -284,9 +278,6 @@ void pp_free(PpContext *ctx)
         Macro *next = m->next;
         free_macro(m);
         m = next;
-    }
-    while (ctx->conds) {
-        free(pop_cond(ctx));
     }
     free(ctx);
 }

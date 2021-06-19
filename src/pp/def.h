@@ -38,6 +38,15 @@ struct Macro {
 };
 
 typedef enum {
+    C_IF,    // #if, #ifdef, or #ifndef
+    C_ELIF,  // #elif
+    C_ELSE,  // #else
+    C_ENDIF, // #endif
+} Cond;
+
+VEC_GEN(Cond, CondList, cond_list)
+
+typedef enum {
     F_LEXER,   // Directly from the lexer
     F_LIST,    // List of tokens (stored in the frame)
 } FrameType;
@@ -47,28 +56,18 @@ struct Frame {
     FrameType type;
     union {
         // F_LEXER
-        LexCtx *lex;    // Lexer context
+        struct {
+            LexCtx      *lex;     // Lexer context
+            CondList    conds;    // Conditional inclusion stack
+        };
         // F_LIST
         struct {
-            Macro *source;  // Originating macro
-            size_t i;       // Current index into the list
-            TokenList list;
+            Macro       *source;  // Originating macro
+            TokenList   list;     // List of tokens
+            size_t      i;        // Current index into the list
         };
     };
     Frame *next;
-};
-
-typedef enum {
-    C_IF,    // #if, #ifdef, or #ifndef
-    C_ELIF,  // #elif
-    C_ELSE,  // #else
-    C_ENDIF, // #endif
-} CondType;
-
-typedef struct Cond Cond;
-struct Cond {
-    CondType type;
-    Cond *next;
 };
 
 //
@@ -86,8 +85,6 @@ struct PpContext {
     Frame *frames;
     // Defined macros
     Macro *macros;
-    // Conditional-inclusion stack
-    Cond  *conds;
 };
 
 //
@@ -118,10 +115,6 @@ Macro *new_macro(PpContext *ctx);
 Macro *find_macro(PpContext *ctx, Token *token);
 void free_macro(Macro *macro);
 void del_macro(PpContext *ctx, Token *token);
-
-// Conditional stack manipulation
-Cond *new_cond(PpContext *ctx, CondType type);
-Cond *pop_cond(PpContext *ctx);
 
 // Evaluate a constant expression from a stored token sequence
 long eval_cexpr(TokenList *list);

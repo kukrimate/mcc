@@ -8,31 +8,31 @@
 #define PP_DEF_H
 
 typedef enum {
-    R_TOKEN,     // Replace with a token
-    R_PARAM_EXP, // Replace with a parameter expanded
-    R_PARAM_STR, // Replace with a parameter stringified
-    R_PARAM_GLU, // Replace with a parameter as is
+    R_TOKEN,   // Token
+    R_PARAM,   // Parameter
+    R_OP_STR,  // Operand of #
+    R_OP_GLU,  // Operand of ##
 } ReplaceType;
 
-typedef struct Replace Replace;
-struct Replace {
+typedef struct {
     ReplaceType type;      // Replace type
-    Token*      token;     // Original token
+    Token       *token;    // Original token
     _Bool       glue_next; // Entry was on the LHS of a glue operator
     ssize_t     param_idx; // Parameter index (for R_PARAM_*) or -1
-    Replace     *next;
-};
+} Replace;
+
+VEC_GEN(Replace, ReplaceList, replace_list)
 
 typedef struct Macro Macro;
 struct Macro {
-    Token     *name;         // Name of this macro
-    _Bool     enabled;       // Is this macro enabled?
-    _Bool     function_like; // Is this macro function like?
-    Replace   *replace_list; // Replacement list
+    Token       *name;         // Name of this macro
+    _Bool       enabled;       // Is this macro enabled?
+    _Bool       function_like; // Is this macro function like?
+    ReplaceList replace_list;  // Replacement list
 
     // Function-like macro-only
-    _Bool     has_varargs;   // Does this macro have varargs parameter?
-    TokenList formals;       // Formal parameters
+    _Bool       has_varargs;   // Does this macro have varargs parameter?
+    TokenList   formals;       // Formal parameters
 
     Macro     *next;
 };

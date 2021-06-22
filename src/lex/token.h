@@ -6,13 +6,10 @@
 // Pre-processor token types
 typedef enum {
     TK_NEW_LINE,        // New line
-
     TK_IDENTIFIER,      // Identifiers
     TK_PP_NUMBER,       // Pre-processing numbers
-
     TK_CHAR_CONST,      // Character constant
     TK_STRING_LIT,      // String literal
-
     TK_LEFT_SQUARE,     // [
     TK_RIGHT_SQUARE,    // ]
     TK_LEFT_PAREN,      // (
@@ -61,7 +58,6 @@ typedef enum {
     TK_COMMA,           // ,
     TK_HASH,            // #
     TK_HASH_HASH,       // ##
-
     TK_OTHER,           // Any other character
 } TokenType;
 
@@ -76,7 +72,6 @@ typedef struct {
 
 // Pre-processor token
 typedef struct {
-    int refcnt;    // Reference count
     TokenType type;   // Type of token
     TokenFlags flags; // Various token flags (used by the pre-processor)
     char *data;       // String data from the lexer
@@ -84,30 +79,21 @@ typedef struct {
 
 // Create a new token
 Token *create_token(TokenType type, TokenFlags flags, char *data);
-// Create a new reference to a token
-Token *ref_token(Token *token);
+// Create a duplicate of a token
+Token *dup_token(Token *token);
 // Free a token
 void free_token(Token *token);
 
-// Output a token to the screen
-void output_token(Token *token);
+const char *token_spelling(Token *token);
 
 // List of pre-processor tokens
 VEC_GEN(Token *, TokenList, token_list)
 // Free a list of tokens (both the tokens in it and the list itself)
 void token_list_freeall(TokenList *list);
-// Extend the contents of a token list from another one, referencing all tokens
-void token_list_refxtend(TokenList *list, TokenList *other);
 
 // Concat the spellings of a list of tokens into a string
 // Used for re-constructing the header name from a list of tokens making up
 // a system header name (e.g. <stdio.h>)
 char *concat_spellings(TokenList *tokens);
-
-// Concat the spellings of a list of tokens into to a new string literal token
-Token *stringize_operator(TokenList *tokens);
-// Glue to tokens together to form one
-Token *glue_operator(Token *left, Token *right);
-
 
 #endif

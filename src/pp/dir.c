@@ -49,7 +49,7 @@ static void dir_expect_newline(PpContext *ctx)
 // Find the index of macro's formal parameter by name
 static ssize_t find_formal(Macro *macro, Token *token)
 {
-    if (token->type == TK_IDENTIFIER) {
+    if (token && token->type == TK_IDENTIFIER) {
         for (size_t i = 0; i < macro->formals.n; ++i) {
             if (!strcmp(macro->formals.arr[i]->data, token->data))
                 return i;
@@ -123,66 +123,69 @@ static void capture_formals(PpContext *ctx, Macro *macro)
 
 static void capture_replace_list(Token *token, PpContext *ctx, Macro *macro)
 {
-    Replace *prev = NULL, **tail = &macro->replace_list;
+    replace_list_init(&macro->replace_list);
+
     _Bool need_glue_rhs = 0;
     ssize_t formal_idx;
+    Replace *replace;
 
     for (;; token = dir_read(ctx)) {
         if (!token)
-            pp_err(ctx, "Replacement list must be terminated by a newline");
+            goto end;
         switch (token->type) {
         case TK_HASH_HASH:
             // Free ## token
             free_token(token);
             // Must be preceeded by something
-            if (!prev)
+            if (macro->replace_list.n == 0)
                 pp_err(ctx, "## operator must not be the first token of a replacement list");
             // Glue the previous entry to the next
-            if (prev->type == R_PARAM_EXP)
-                prev->type = R_PARAM_GLU;
+            Replace *prev = replace_list_top(&macro->replace_list);
+            if (prev->type == R_PARAM)
+                prev->type = R_OP_GLU;
             prev->glue_next = 1;
             // Make sure the RHS actually exists
             need_glue_rhs = 1;
             break;
         case TK_HASH:
             if (macro->function_like) {
-                // Free # token
-                free_token(token);
                 // Get formal parameter name
-                token = dir_read(ctx);
-                if (!token || (formal_idx = find_formal(macro, token)) < 0)
+                Token *formal_name = dir_read(ctx);
+                if ((formal_idx = find_formal(macro, formal_name)) < 0)
                     pp_err(ctx, "# operator must be followed by formal parameter name");
+                free_token(formal_name);
                 // Stringized parameter will be added to the expansion
-                prev = *tail = calloc(1, sizeof **tail);
-                (*tail)->type = R_PARAM_STR;
-                (*tail)->token = token;
-                (*tail)->param_idx = formal_idx;
-                tail = &(*tail)->next;
+                replace = replace_list_push(&macro->replace_list);
+                replace->type = R_OP_STR;
+                replace->token = token;
+                replace->param_idx = formal_idx;
+                replace->glue_next = 0;
                 need_glue_rhs = 0;
                 break;
             }
             // FALLTHROUGH
         default:
             // Append token or parameter index to replacement list
-            prev = *tail = calloc(1, sizeof **tail);
+            replace = replace_list_push(&macro->replace_list);
             if (macro->function_like && (formal_idx = find_formal(macro, token)) >= 0) {
-                (*tail)->type = need_glue_rhs ? R_PARAM_GLU : R_PARAM_EXP;
-                (*tail)->token = token;
-                (*tail)->param_idx = formal_idx;
+                replace->type = need_glue_rhs ? R_OP_GLU : R_PARAM;
+                replace->token = token;
+                replace->param_idx = formal_idx;
             } else {
-                (*tail)->type = R_TOKEN;
-                (*tail)->token = token;
+                replace->type = R_TOKEN;
+                replace->token = token;
             }
-            tail = &(*tail)->next;
+            replace->glue_next = 0;
             need_glue_rhs = 0;
             break;
         case TK_NEW_LINE:
-            if (need_glue_rhs)
-                pp_err(ctx, "## operator must not be the last token in a replacement list");
             free_token(token);
-            return;
+            goto end;
         }
     }
+end:
+    if (need_glue_rhs)
+        pp_err(ctx, "## operator must not be the last token in a replacement list");
 }
 
 static void dir_define(PpContext *ctx)

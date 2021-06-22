@@ -11,11 +11,13 @@
 
 static void do_preprocess(PpContext *pp)
 {
-    Token *tmp;
-    // Read then output all tokens from the pre-processor
-    while ((tmp = pp_next(pp))) {
-        output_token(tmp);
-        free_token(tmp);
+    Token *token;
+
+    while ((token = pp_next(pp))) {
+        if (token->flags.lwhite)
+            putchar(' ');
+        fputs(token_spelling(token), stdout);
+        free_token(token);
     }
 }
 

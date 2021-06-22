@@ -16,26 +16,23 @@ Token *create_token(TokenType type, TokenFlags flags, char *data)
     Token *token;
 
     token = calloc(1, sizeof *token);
-    token->refcnt = 1;
     token->type = type;
     token->flags = flags;
     token->data = data;
     return token;
 }
 
-Token *ref_token(Token *token)
+Token *dup_token(Token *token)
 {
-    ++token->refcnt;
-    return token;
+    return create_token(token->type, token->flags,
+        token->data ? strdup(token->data) : NULL);
 }
 
 void free_token(Token *token)
 {
-    if (!--token->refcnt) {
-        if (token->data)
-            free(token->data);
-        free(token);
-    }
+    if (token->data)
+        free(token->data);
+    free(token);
 }
 
 static char *token_str[] = {
@@ -90,7 +87,7 @@ static char *token_str[] = {
     [TK_HASH_HASH    ] = "##",
 };
 
-static const char *token_spelling(Token *token)
+const char *token_spelling(Token *token)
 {
     switch (token->type) {
     case TK_IDENTIFIER:
@@ -104,24 +101,11 @@ static const char *token_spelling(Token *token)
     }
 }
 
-void output_token(Token *token)
-{
-    /*if (token->flags.lwhite)*/
-        putchar(' ');
-    fputs(token_spelling(token), stdout);
-}
-
 void token_list_freeall(TokenList *list)
 {
     for (size_t i = 0; i < list->n; ++i)
         free_token(list->arr[i]);
     token_list_free(list);
-}
-
-void token_list_refxtend(TokenList *list, TokenList *other)
-{
-    for (size_t i = 0; i < other->n; ++i)
-        token_list_add(list, ref_token(other->arr[i]));
 }
 
 char *concat_spellings(TokenList *tokens)
@@ -131,74 +115,4 @@ char *concat_spellings(TokenList *tokens)
     for (size_t i = 0; i < tokens->n; ++i)
         sb_addstr(&sb, token_spelling(tokens->arr[i]));
     return sb_str(&sb);
-}
-
-Token *stringize_operator(TokenList *tokens)
-{
-    StringBuilder sb;
-
-    sb_init(&sb);
-    sb_add(&sb, '\"');
-
-    for (size_t i = 0; i < tokens->n; ++i) {
-        Token *token = tokens->arr[i];
-
-        // Ignore whitespace before the first token, otherwise add single space
-        // if lwhite was set by the lexer (per ISO/IEC 9899:1999 6.10.3.2)
-        if (i > 0 && token->flags.lwhite)
-            sb_add(&sb, ' ');
-
-        switch (token->type) {
-        case TK_IDENTIFIER:
-        case TK_PP_NUMBER:
-        case TK_OTHER:
-            sb_addstr(&sb, token->data);
-            break;
-        case TK_CHAR_CONST:
-        case TK_STRING_LIT:
-            for (const char *s = token->data; *s; ++s)
-                switch (*s) {
-                case '\\':
-                case '\"':
-                    sb_add(&sb, '\\');
-                    // FALLTHROUGH
-                default:
-                    sb_add(&sb, *s);
-                    break;
-                }
-            break;
-        default:
-            sb_addstr(&sb, token_str[token->type]);
-            break;
-        }
-    }
-
-    sb_add(&sb, '\"');
-    return create_token(TK_STRING_LIT, TOKEN_NOFLAGS, sb_str(&sb));
-}
-
-Token *glue_operator(Token *left, Token *right)
-{
-    // Combine the spelling of the two tokens (without whitespaces)
-    StringBuilder sb;
-    sb_init(&sb);
-    sb_addstr(&sb, token_spelling(left));
-    sb_addstr(&sb, token_spelling(right));
-    char *combined = sb_str(&sb);
-
-    // Fee old tokens
-    free_token(left);
-    free_token(right);
-
-    // Re-lex new combined token
-    LexCtx *lex = lex_open_string("glue_tmp", combined);
-    Token *result = lex_next(lex);
-    // If there are more tokens, it means glue failed
-    if (lex_next(lex))
-        return NULL;
-    // Free buffers
-    lex_free(lex);
-    free(combined);
-
-    return result;
 }

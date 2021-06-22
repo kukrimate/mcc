@@ -225,19 +225,13 @@ Macro *find_macro(PpContext *ctx, Token *token)
 
 void free_macro(Macro *macro)
 {
-    Replace *head, *tmp;
-
     // Free macro name
     free_token(macro->name);
 
     // Free replacement list
-    head = macro->replace_list;
-    while (head) {
-        tmp = head->next;
-        free_token(head->token);
-        free(head);
-        head = tmp;
-    }
+    for (size_t i = 0; i < macro->replace_list.n; ++i)
+        free_token(macro->replace_list.arr[i].token);
+    replace_list_free(&macro->replace_list);
 
     // Free formal parameters for function like macro
     if (macro->function_like)

@@ -9,6 +9,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <vec.h>
 #include <lex/token.h>
 #include <pp/pp.h>
 

@@ -81,6 +81,8 @@ struct PpContext {
     PpContext *parent;
     // Header search directories
     SearchDirs search_dirs;
+    // Translation time and date
+    struct tm *start_time;
     // Preprocessor frames
     Frame *frames;
     // Defined macros

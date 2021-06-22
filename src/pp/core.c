@@ -4,48 +4,97 @@
 // Pre-processor: core logic
 //
 
-#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
 #include <vec.h>
 #include <lex/token.h>
 #include <lex/lex.h>
 #include "pp.h"
 #include "def.h"
 
+static Frame *find_lexer_frame(PpContext *ctx)
+{
+    // Skip all sub-contexts (they never include lexer frames)
+    while (ctx->parent)
+        ctx = ctx->parent;
+    // Walk the stack of the first real context
+    Frame *file_frame = ctx->frames;
+    while (file_frame && file_frame->type != F_LEXER)
+        file_frame = file_frame->next;
+    // A file frame should always exist, otherwise we abort
+    if (!file_frame)
+        abort();
+    return file_frame;
+}
+
+static struct tm *find_start_time(PpContext *ctx)
+{
+    // Only the topmost context has the start time
+    while (ctx->parent)
+        ctx = ctx->parent;
+    return ctx->start_time;
+}
+
+void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ...)
+{
+    Frame *lex_frame = find_lexer_frame(ctx);
+    fflush(stdout);
+    fprintf(stderr, "Error: %s:%ld: ", lex_path(lex_frame->lex),
+        lex_line(lex_frame->lex));
+    va_list ap;
+    va_start(ap, err);
+    vfprintf(stderr, err, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    exit(1);
+}
+
+static Token *create_string_lit(const char *str)
+{
+    StringBuilder sb;
+    sb_init(&sb);
+    sb_add(&sb, '\"');
+    sb_addstr(&sb, str);
+    sb_add(&sb, '\"');
+    return create_token(TK_STRING_LIT, TOKEN_NOFLAGS, sb_str(&sb));
+}
+
 static void handle_date(PpContext *ctx)
 {
-    TokenList *list = pp_push_list_frame(ctx, NULL);
-    token_list_add(list,
-        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("Mar  7 2021")));
+    char buf[12];
+    // FIXME: %b is locale specific :/
+    strftime(buf, sizeof buf, "%b %d %Y", find_start_time(ctx));
+    token_list_add(pp_push_list_frame(ctx, NULL), create_string_lit(buf));
 }
 
 static void handle_time(PpContext *ctx)
 {
-    TokenList *list = pp_push_list_frame(ctx, NULL);
-    token_list_add(list,
-        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("15:30:07")));
+    char buf[12];
+    strftime(buf, sizeof buf, "%H:%M:%S", find_start_time(ctx));
+    token_list_add(pp_push_list_frame(ctx, NULL), create_string_lit(buf));
 }
 
 static void handle_file(PpContext *ctx)
 {
-    TokenList *list = pp_push_list_frame(ctx, NULL);
-    token_list_add(list,
-        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("unknown")));
+    Frame *lex_frame = find_lexer_frame(ctx);
+    // Find filename from path
+    const char *prev = lex_path(lex_frame->lex), *next;
+    while ((next = strchr(prev, '/')))
+        prev = next + 1;
+    // Add filename string literal to tokens
+    token_list_add(pp_push_list_frame(ctx, NULL), create_string_lit(prev));
 }
 
 static void handle_line(PpContext *ctx)
 {
-    TokenList *list = pp_push_list_frame(ctx, NULL);
-    token_list_add(list,
-        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
-}
-
-static void handle_one(PpContext *ctx)
-{
-    TokenList *list = pp_push_list_frame(ctx, NULL);
-    token_list_add(list,
-        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
+    Frame *lex_frame = find_lexer_frame(ctx);
+    // Convert line number to string
+    char buf[10];
+    snprintf(buf, sizeof buf, "%ld", lex_line(lex_frame->lex));
+    // Add pre-processing number token with the line number
+    token_list_add(pp_push_list_frame(ctx, NULL),
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup(buf)));
 }
 
 static void handle_vers(PpContext *ctx)
@@ -53,6 +102,13 @@ static void handle_vers(PpContext *ctx)
     TokenList *list = pp_push_list_frame(ctx, NULL);
     token_list_add(list,
         create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("199901L")));
+}
+
+static void handle_one(PpContext *ctx)
+{
+    TokenList *list = pp_push_list_frame(ctx, NULL);
+    token_list_add(list,
+        create_token(TK_PP_NUMBER, TOKEN_NOFLAGS, strdup("1")));
 }
 
 //
@@ -91,27 +147,6 @@ Predef *find_predef(Token *identifier)
         if (!strcmp(predefs[i].name, identifier->data))
             return predefs + i;
     return NULL;
-}
-
-void __attribute__((noreturn)) pp_err(PpContext *ctx, const char *err, ...)
-{
-    while (ctx->parent)
-        ctx = ctx->parent;
-    Frame *file_frame = ctx->frames;
-    while (file_frame->type != F_LEXER) {
-        file_frame = file_frame->next;
-        assert(file_frame != NULL);
-    }
-
-    fflush(stdout);
-    fprintf(stderr, "Error: %s:%ld: ", lex_path(file_frame->lex),
-        lex_line(file_frame->lex));
-    va_list ap;
-    va_start(ap, err);
-    vfprintf(stderr, err, ap);
-    va_end(ap);
-    fputc('\n', stderr);
-    exit(1);
 }
 
 static Frame *new_frame(PpContext *ctx)
@@ -259,6 +294,8 @@ PpContext *pp_create(void)
 {
     PpContext *ctx = calloc(1, sizeof *ctx);
     dirs_init(&ctx->search_dirs);
+    time_t rawtime = time(NULL);
+    ctx->start_time = localtime(&rawtime);
     return ctx;
 }
 

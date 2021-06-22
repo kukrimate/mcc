@@ -112,8 +112,8 @@ Macro *find_macro(PpContext *ctx, Token *token);
 void free_macro(Macro *macro);
 void del_macro(PpContext *ctx, Token *token);
 
-// Evaluate a constant expression from a stored token sequence
-long eval_cexpr(PpContext *ctx, TokenList *list);
+// Evaluate a constant expression
+long eval_cexpr(PpContext *pp);
 
 // Handle a pre-processor directive
 void handle_directive(PpContext *ctx);

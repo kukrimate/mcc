@@ -14,22 +14,37 @@
 #include "pp.h"
 #include "def.h"
 
-// Convert an integer constant to a long
-static long read_number(PpContext *ctx, Token *pp_num)
+typedef struct {
+    PpContext *pp;
+    Token *cur;
+} EvalCtx;
+
+static Token *eval_next(EvalCtx *ctx, TokenType type)
 {
-    // List of allowed integer constant suffixes
-    static char *allowed_suffixes[] = {
-        "", "u", "U", "l", "L",
-        "ul", "UL", "uL", "Ul", "lu", "LU", "lU", "Lu",
-        "ull", "ULL", "uLL", "Ull", "llu", "LLU", "llU", "LLu",
-        NULL
-    };
+    if (!ctx->cur)
+        ctx->cur = pp_next(ctx->pp);
+    if (ctx->cur && ctx->cur->type == type) {
+        Token *cur = ctx->cur;
+        ctx->cur = NULL;
+        return cur;
+    }
+    return NULL;
+}
 
-    char *cur, **suf;
-    long value;
+static _Bool eval_match(EvalCtx *ctx, TokenType type)
+{
+    Token *token = eval_next(ctx, type);
+    if (token) {
+        free_token(token);
+        return 1;
+    }
+    return 0;
+}
 
-    cur = pp_num->data;
-    value = 0;
+static long read_number(EvalCtx *ctx, Token *pp_num)
+{
+    char *cur = pp_num->data;
+    long value = 0;
 
     // Parse value
     switch (*cur) {
@@ -48,7 +63,7 @@ static long read_number(PpContext *ctx, Token *pp_num)
                     value = value << 4 | (*cur - 'A' + 0xa);
                     break;
                 default:
-                    goto check_suf;
+                    goto end;
                 }
         } else {
             // Octal
@@ -58,7 +73,7 @@ static long read_number(PpContext *ctx, Token *pp_num)
                     value = value << 3 | (*cur - '0');
                     break;
                 default:
-                    goto check_suf;
+                    goto end;
                 }
         }
         break;
@@ -70,25 +85,27 @@ static long read_number(PpContext *ctx, Token *pp_num)
                 value = value * 10 + (*cur - '0');
                 break;
             default:
-                goto check_suf;
+                goto end;
             }
         break;
     }
 
-check_suf:
-    // Check if the number has a correct suffix
-    for (suf = allowed_suffixes; *suf; ++suf)
-        if (!strcmp(*suf, cur))
+end:
+    for (const char **suffix = (const char *[]) { "", "u", "U", "l", "L",
+            "ul", "UL", "uL", "Ul", "lu", "LU", "lU", "Lu", "ull", "ULL",
+            "uLL", "Ull", "llu", "LLU", "llU", "LLu", NULL, };
+            *suffix; ++suffix)
+        if (!strcmp(*suffix, cur)) {
+            free_token(pp_num);
             return value;
+        }
 
-    // Suffix was incorrect
-    pp_err(ctx, "Invalid integer constant");
+    pp_err(ctx->pp, "Invalid integer constant");
 }
 
 static int octal(int ch, char **str)
 {
     ch -= '0';
-    // Octal constants allow 3 digits max
     switch (**str) {
     case '0' ... '7':
         ch = ch << 3 | (*(*str)++ - '0');
@@ -108,7 +125,7 @@ end:
 static int hexadecimal(int ch, char **str)
 {
     ch = 0;
-    for (;;) // Hex constants can be any length
+    for (;;)
         switch (**str) {
         case '0' ... '9':
             ch = ch << 4 | (*(*str)++ - '0');
@@ -120,13 +137,13 @@ static int hexadecimal(int ch, char **str)
             ch = ch << 4 | (*(*str)++ - 'A' + 0xa);
             break;
         default:
-            goto endloop;
+            goto end;
         }
-endloop:
+end:
     return ch;
 }
 
-static int escseq(PpContext *ctx, char **str)
+static int escseq(EvalCtx *ctx, char **str)
 {
     int ch = *(*str)++;
     switch (ch) {
@@ -154,18 +171,15 @@ static int escseq(PpContext *ctx, char **str)
     case 'x':
         return hexadecimal(ch, str);
     default:
-        pp_err(ctx, "Invalid escape sequence");
+        pp_err(ctx->pp, "Invalid escape sequence");
     }
 }
 
 // Convert a character constant to a long
-static long read_char(PpContext *ctx, Token *char_const)
+static long read_char(EvalCtx *ctx, Token *char_const)
 {
-    char *str;
-    long val;
-
-    str = char_const->data;
-    val = 0;
+    char *str = char_const->data;
+    long val = 0;
 
     if (*str == 'L')    // Optional L prefix
         ++str;
@@ -184,43 +198,21 @@ static long read_char(PpContext *ctx, Token *char_const)
             val = val << 8 | escseq(ctx, &str);
             break;
         case '\'':
+            free_token(char_const);
             return val;
         case 0:         // Must end with '
             goto err;
         }
 err:
-    pp_err(ctx, "Invalid character constant");
+    pp_err(ctx->pp, "Invalid character constant");
 }
 
-// Iterator for a TokenList
-typedef struct {
-    TokenList *list;
-    size_t i;
-} TokenIterator;
-
-#define TOKEN_IT_NEW(list) (TokenIterator) { .list = list, .i = 0 }
-#define TOKEN_IT_HASCUR(it) ((it)->i < (it)->list->n)
-#define TOKEN_IT_CUR(it) (it)->list->arr[(it)->i]
-#define TOKEN_IT_NEXT(it) ++(it)->i
-
-// Return next token if it matches
-static Token *next_tk(TokenIterator *it, TokenType type)
+static int peak_bop(EvalCtx *ctx)
 {
-    if (TOKEN_IT_HASCUR(it)) {
-        Token *cur = TOKEN_IT_CUR(it);
-        if (cur->type == type) {
-            TOKEN_IT_NEXT(it);
-            return cur;
-        }
-    }
-    return NULL;
-}
-
-// Check if a token the next token binary opeartor
-static int peek_bop(TokenIterator *it)
-{
-    if (TOKEN_IT_HASCUR(it)) {
-        switch (TOKEN_IT_CUR(it)->type) {
+    if (!ctx->cur)
+        ctx->cur = pp_next(ctx->pp);
+    if (ctx->cur) {
+        switch (ctx->cur->type) {
         case TK_STAR:           break;
         case TK_FWD_SLASH:      break;
         case TK_PERCENT:        break;
@@ -241,12 +233,11 @@ static int peek_bop(TokenIterator *it)
         case TK_LOGIC_OR:       break;
         default:                return -1;
         }
-        return TOKEN_IT_CUR(it)->type;
+        return ctx->cur->type;
     }
     return -1;
 }
 
-// Evaluate a binary opeartor
 static long eval_bop(TokenType op, long lhs, long rhs)
 {
     switch (op) {
@@ -274,40 +265,40 @@ static long eval_bop(TokenType op, long lhs, long rhs)
 }
 
 // Hybrid recursive descent and operator presedence parser
-static long p_unary(PpContext *ctx, TokenIterator *it);
-static long p_binary(PpContext *ctx, TokenIterator *it, long lhs, int min_precedence);
-static long p_cond(PpContext *ctx, TokenIterator *it);
+static long p_unary(EvalCtx *ctx);
+static long p_binary(EvalCtx *ctx, long lhs, int min_precedence);
+static long p_cond(EvalCtx *ctx);
 
-long p_unary(PpContext *ctx, TokenIterator *it)
+long p_unary(EvalCtx *ctx)
 {
-    long value;
-    Token *token;
-
-    if (next_tk(it, TK_LEFT_PAREN)) {
-        value = p_cond(ctx, it);
-        if (!next_tk(it, TK_RIGHT_PAREN))
-            pp_err(ctx, "Missing )");
+    if (eval_match(ctx, TK_LEFT_PAREN)) {
+        long value = p_cond(ctx);
+        if (!eval_match(ctx, TK_RIGHT_PAREN))
+            pp_err(ctx->pp, "Missing )");
         return value;
     }
-    if ((token = next_tk(it, TK_IDENTIFIER)))
-        return 0;
-    if ((token = next_tk(it, TK_PP_NUMBER)))
-        return read_number(ctx, token);
-    if ((token = next_tk(it, TK_CHAR_CONST)))
-        return read_char(ctx, token);
-    if (next_tk(it, TK_PLUS))
-        return p_unary(ctx, it);
-    if (next_tk(it, TK_MINUS))
-        return -p_unary(ctx, it);
-    if (next_tk(it, TK_TILDE))
-        return ~p_unary(ctx, it);
-    if (next_tk(it, TK_EXCL_MARK))
-        return !p_unary(ctx, it);
 
-    pp_err(ctx, "Invalid unary expression");
+    Token *token;
+    if ((token = eval_next(ctx, TK_PP_NUMBER)))
+        return read_number(ctx, token);
+    if ((token = eval_next(ctx, TK_CHAR_CONST)))
+        return read_char(ctx, token);
+
+    if (eval_match(ctx, TK_IDENTIFIER))
+        return 0;
+    if (eval_match(ctx, TK_PLUS))
+        return p_unary(ctx);
+    if (eval_match(ctx, TK_MINUS))
+        return -p_unary(ctx);
+    if (eval_match(ctx, TK_TILDE))
+        return ~p_unary(ctx);
+    if (eval_match(ctx, TK_EXCL_MARK))
+        return !p_unary(ctx);
+
+    pp_err(ctx->pp, "Invalid unary expression");
 }
 
-long p_binary(PpContext *ctx, TokenIterator *it, long lhs, int min_precedence)
+long p_binary(EvalCtx *ctx, long lhs, int min_precedence)
 {
     // Precedence table
     static int precedences[] = {
@@ -331,56 +322,51 @@ long p_binary(PpContext *ctx, TokenIterator *it, long lhs, int min_precedence)
         [TK_LOGIC_OR    ] = 0, // ||
     };
 
-    int op, op_next;
-    long rhs;
-
     for (;;) {
-        // Read operator
-        op = peek_bop(it);
+        // Peak for binary operator
+        int op = peak_bop(ctx);
         if (op < 0 || precedences[op] < min_precedence)
             return lhs;
-        // Move to next token
-        TOKEN_IT_NEXT(it);
+        // Consume operator token
+        free_token(ctx->cur);
+        ctx->cur = NULL;
         // Read RHS
-        rhs = p_unary(ctx, it);
+        long rhs = p_unary(ctx);
         // Recurse on operators with greater precedence
         for (;;) {
-            op_next = peek_bop(it);
-            if (op_next < 0 || precedences[op_next] <= precedences[op])
+            int next_op = peak_bop(ctx);
+            if (next_op < 0 || precedences[next_op] <= precedences[op])
                 break;
-            rhs = p_binary(ctx, it, rhs, precedences[op_next]);
+            rhs = p_binary(ctx, rhs, precedences[next_op]);
         }
         // Evaluate current operand
         lhs = eval_bop(op, lhs, rhs);
     }
 }
 
-long p_cond(PpContext *ctx, TokenIterator *it)
+long p_cond(EvalCtx *ctx)
 {
-    long l, m, r;
-
     // Left side
-    l = p_binary(ctx, it, p_unary(ctx, it), 0);
+    long l = p_binary(ctx, p_unary(ctx), 0);
     // Look for ? for conditional
-    if (!next_tk(it, TK_QUEST_MARK))
+    if (!eval_match(ctx, TK_QUEST_MARK))
         return l;
     // Middle
-    m = p_cond(ctx, it);
+    long m = p_cond(ctx);
     // Error on missing :
-    if (!next_tk(it, TK_COLON))
-        pp_err(ctx, "Missing : from trinary conditional");
+    if (!eval_match(ctx, TK_COLON))
+        pp_err(ctx->pp, "Missing : from trinary conditional");
     // Right
-    r = p_cond(ctx, it);
-
+    long r = p_cond(ctx);
     // Evaluate
     return l ? m : r;
 }
 
-long eval_cexpr(PpContext *ctx, TokenList *list)
+long eval_cexpr(PpContext *pp)
 {
-    TokenIterator it = TOKEN_IT_NEW(list);
-    long value = p_cond(ctx, &it);
-    if (TOKEN_IT_HASCUR(&it)) // Make sure there are no tokens left
-        pp_err(ctx, "Invalid constant expression");
+    EvalCtx eval_ctx = { .pp = pp, .cur = NULL };
+    long value = p_cond(&eval_ctx);
+    if (eval_ctx.cur || pp_next(pp)) // Make sure there are no tokens left
+        pp_err(pp, "Invalid constant expression");
     return value;
 }

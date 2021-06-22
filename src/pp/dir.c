@@ -276,7 +276,7 @@ static _Bool eval_if(PpContext *ctx)
     for (;;) {
         Token *token = dir_read(ctx);
         if (!token)
-            pp_err(ctx, "#if missing terminating newline");
+            break;
         if (token->type == TK_NEW_LINE) {
             free_token(token);
             break;
@@ -288,16 +288,8 @@ static _Bool eval_if(PpContext *ctx)
         token_list_add(list, token);
     }
 
-    // Macro expand constant expression
-    TokenList cexpr;
-    token_list_init(&cexpr);
-    for (Token *token; (token = pp_next(&subctx)); )
-        token_list_add(&cexpr, token);
-
-    // Finally evaluate the constant expression
-    _Bool result = eval_cexpr(ctx, &cexpr);
-    token_list_freeall(&cexpr);
-    return result;
+    // Evaluate the constant expression
+    return eval_cexpr(&subctx);
 }
 
 static _Bool eval_ifdef(PpContext *ctx)
